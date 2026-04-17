@@ -1,0 +1,9 @@
+{
+  "package": {
+    "name": "openwalk",
+    "version": "0.1.0",
+    "description": "Local-first Scheme runtime CLI with browser automation bindings",
+    "private": true
+  },
+  "tools": {}
+}
