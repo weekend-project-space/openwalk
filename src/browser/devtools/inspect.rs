@@ -45,7 +45,7 @@ impl BrowserActor {
         page.execute(
             HighlightNodeParams::builder()
                 .highlight_config(default_highlight_config())
-                .node_id(resolved.node_id.clone())
+                .node_id(resolved.node_id)
                 .build()
                 .expect("highlight params should build"),
         )
@@ -100,26 +100,24 @@ impl BrowserActor {
             Duration::from_millis(timeout_ms)
         };
         let picked_backend_node = timeout(timeout_duration, async {
-            loop {
-                tokio::select! {
-                    event = pick_events.next() => {
-                        match event {
-                            Some(event) => {
-                                return Ok(event.as_ref().clone().backend_node_id);
-                            }
-                            None => {
-                                return Err(anyhow!("inspect mode closed before a node was selected"));
-                            }
+            tokio::select! {
+                event = pick_events.next() => {
+                    match event {
+                        Some(event) => {
+                            Ok(event.as_ref().clone().backend_node_id)
+                        }
+                        None => {
+                            Err(anyhow!("inspect mode closed before a node was selected"))
                         }
                     }
-                    event = cancel_events.next() => {
-                        match event {
-                            Some(_) => {
-                                return Err(anyhow!("inspect mode was canceled before a node was selected"));
-                            }
-                            None => {
-                                return Err(anyhow!("inspect mode closed before a node was selected"));
-                            }
+                }
+                event = cancel_events.next() => {
+                    match event {
+                        Some(_) => {
+                            Err(anyhow!("inspect mode was canceled before a node was selected"))
+                        }
+                        None => {
+                            Err(anyhow!("inspect mode closed before a node was selected"))
                         }
                     }
                 }
@@ -168,7 +166,7 @@ impl BrowserActor {
                 let described = page
                     .execute(
                         DescribeNodeParams::builder()
-                            .node_id(query.result.node_id.clone())
+                            .node_id(query.result.node_id)
                             .build(),
                     )
                     .await
@@ -197,11 +195,7 @@ impl BrowserActor {
                     .next()
                     .ok_or_else(|| anyhow!("xpath `{xpath}` did not return a node id"))?;
                 let described = page
-                    .execute(
-                        DescribeNodeParams::builder()
-                            .node_id(node_id.clone())
-                            .build(),
-                    )
+                    .execute(DescribeNodeParams::builder().node_id(node_id).build())
                     .await
                     .with_context(|| format!("failed to describe xpath `{xpath}`"))?;
                 Ok(ResolvedNode {

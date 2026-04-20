@@ -12,11 +12,12 @@ use crate::{
         attach_browser_session_with_options, ensure_browser_session_with_options, BrowserService,
         BrowserSessionLaunchOptions, EphemeralLaunchOptions,
     },
-    cli::{Cli, Command, ToolCommand, ToolExecArgs},
+    cli::{Cli, Command, InitArgs, ToolCommand, ToolExecArgs},
     output::{normalize_result_value, parse_output_format, print_execution_result, OutputFormat},
     scheme_runtime,
+    tool_hub::install_tool_from_hub,
     tool_metadata::{load_tool_metadata, ToolMetadata},
-    workspace::{GlobalHome, InstalledPackage, Workspace},
+    workspace::{GlobalHome, InitOptions, InstalledPackage, Workspace},
 };
 
 #[cfg(unix)]
@@ -64,6 +65,18 @@ struct BrowserLaunchOptions {
     create_session_if_missing: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageInstallStatus {
+    Installed,
+    AlreadyInstalled,
+}
+
+#[derive(Debug, Clone)]
+struct PackageInstallResult {
+    entry_path: PathBuf,
+    status: PackageInstallStatus,
+}
+
 impl BrowserLaunchOptions {
     fn with_session(session: Option<String>) -> Self {
         Self {
@@ -88,9 +101,9 @@ pub async fn run(cli: Cli) -> Result<()> {
     // The app layer owns command dispatch so CLI parsing, persistence, and execution policy
     // stay separated.
     match cli.command {
-        Command::Init => {
+        Command::Init(args) => {
             let workspace = Workspace::discover()?;
-            init_workspace(&workspace)
+            init_workspace(&workspace, args)
         }
         Command::Run(args) => run_local(args).await,
         Command::Exec(args) => {
@@ -106,23 +119,42 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn init_workspace(workspace: &Workspace) -> Result<()> {
-    let summary = workspace.init()?;
+fn init_workspace(workspace: &Workspace, args: InitArgs) -> Result<()> {
+    let output_format = parse_output_format(&args.format)?;
+    let options = InitOptions {
+        name: args.name,
+        tools: args.tools,
+        force: args.force,
+    };
 
-    println!("workspace: {}", workspace.base_dir().display());
-    println!(
-        "status: {}",
-        if summary.created_root || summary.created_manifest || summary.created_tool_dir {
-            "initialized"
-        } else {
-            "already initialized"
-        }
-    );
-    println!("created_root: {}", summary.created_root);
-    println!("created_manifest: {}", summary.created_manifest);
-    println!("created_tool_dir: {}", summary.created_tool_dir);
-    println!("manifest: {}", workspace.manifest_path().display());
+    let summary = workspace.init_with_options(options)?;
 
+    let status = if summary.overwritten_manifest {
+        "reinitialized"
+    } else if summary.created_root || summary.created_manifest || summary.created_tool_dir {
+        "initialized"
+    } else {
+        "already initialized"
+    };
+
+    let mut payload = json!({
+        "mode": "init",
+        "workspace": workspace.base_dir().display().to_string(),
+        "manifest": workspace.manifest_path().display().to_string(),
+        "status": status,
+        "created": {
+            "root": summary.created_root,
+            "manifest": summary.created_manifest,
+            "tool_dir": summary.created_tool_dir,
+        },
+        "overwritten_manifest": summary.overwritten_manifest,
+    });
+
+    if let Some(backup) = summary.backup_path {
+        payload["backup"] = json!(backup.display().to_string());
+    }
+
+    print_execution_result(output_format, &payload)?;
     Ok(())
 }
 
@@ -173,30 +205,12 @@ async fn exec_tool(
         return run_builtin_tool(global_home, "exec", &tool, &cli_args).await;
     }
 
-    let parsed_args = extract_common_runtime_args(&cli_args)?;
+    if let Some(script_path) = resolve_global_tool_target(global_home, &tool) {
+        return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
+    }
 
-    // `exec` keeps the future local-first / remote-fallback decision visible even before
-    // package manifests and remote runtime resolution are wired in.
-    let source = if package_exists(&workspace.load_tools_or_default()?, &tool) {
-        "workspace-package"
-    } else if package_exists(&global_home.load_tools()?, &tool) {
-        "global-package"
-    } else {
-        "remote-fallback"
-    };
-
-    print_execution_result(
-        parsed_args.output_format,
-        &json!({
-            "mode": "exec",
-            "tool": tool,
-            "source": source,
-            "args": parsed_args.runtime_args,
-            "status": "simulated",
-        }),
-    )?;
-
-    Ok(())
+    let installed = ensure_workspace_package_installed(workspace, &tool)?;
+    run_scheme_script(global_home, "exec", &installed.entry_path, &cli_args).await
 }
 
 fn handle_tool_command(
@@ -215,78 +229,60 @@ fn handle_tool_command(
 }
 
 fn install_package(workspace: &Workspace, package: String) -> Result<()> {
-    let mut store = workspace.load_tools()?;
-
-    // Phase 1 still models installs as exact package-name entries in the local tool store.
-    if store.packages.iter().any(|item| item.name == package) {
-        println!("package: {package}");
-        println!("status: already installed");
-        return Ok(());
-    }
-
-    store.packages.push(InstalledPackage {
-        name: package.clone(),
-        version: None,
-        path: None,
-    });
-    store
-        .packages
-        .sort_by(|left, right| left.name.cmp(&right.name));
-    workspace.save_tools(&store)?;
+    let install = ensure_workspace_package_installed(workspace, &package)?;
 
     println!("package: {package}");
-    println!("status: installed");
+    println!("scope: workspace");
+    println!(
+        "status: {}",
+        match install.status {
+            PackageInstallStatus::Installed => "installed",
+            PackageInstallStatus::AlreadyInstalled => "already installed",
+        }
+    );
+    println!("script: {}", install.entry_path.display());
 
     Ok(())
 }
 
 fn uninstall_package(workspace: &Workspace, package: String) -> Result<()> {
+    workspace.ensure_initialized()?;
     let mut store = workspace.load_tools()?;
     let original_len = store.packages.len();
     store.packages.retain(|item| item.name != package);
+    let tool_dir = workspace.tool_dir(&package);
+    let had_files = tool_dir.exists();
 
-    if store.packages.len() == original_len {
+    if store.packages.len() == original_len && !had_files {
         bail!("package `{package}` is not installed");
     }
 
-    workspace.save_tools(&store)?;
+    if store.packages.len() != original_len {
+        workspace.save_tools(&store)?;
+    }
+    remove_path_if_exists(&tool_dir)?;
 
     println!("package: {package}");
     println!("status: uninstalled");
+    println!("scope: workspace");
 
     Ok(())
 }
 
 fn install_global_package(global_home: &GlobalHome, package: String) -> Result<()> {
-    let mut store = global_home.load_tools()?;
-    let already_installed = package_exists(&store, &package);
-
-    if !already_installed {
-        store.packages.push(InstalledPackage {
-            name: package.clone(),
-            version: None,
-            path: None,
-        });
-        store
-            .packages
-            .sort_by(|left, right| left.name.cmp(&right.name));
-        global_home.save_tools(&store)?;
-    } else {
-        global_home.init()?;
-    }
-
+    let install = ensure_global_package_installed(global_home, &package)?;
     let shim_path = write_global_shim(global_home, &package)?;
 
     println!("package: {package}");
     println!("scope: global");
     println!(
         "status: {}",
-        if already_installed {
-            "already installed"
-        } else {
-            "installed"
+        match install.status {
+            PackageInstallStatus::Installed => "installed",
+            PackageInstallStatus::AlreadyInstalled => "already installed",
         }
     );
+    println!("script: {}", install.entry_path.display());
     println!("shim: {}", shim_path.display());
     println!("bin_dir: {}", global_home.bin_dir().display());
     println!(
@@ -301,23 +297,135 @@ fn uninstall_global_package(global_home: &GlobalHome, package: String) -> Result
     let mut store = global_home.load_tools()?;
     let original_len = store.packages.len();
     store.packages.retain(|item| item.name != package);
+    let tool_dir = global_home.tool_dir(&package);
+    let shim_path = global_home.shim_path(&package);
+    let had_tool_dir = tool_dir.exists();
+    let had_shim = shim_path.exists();
 
-    if store.packages.len() == original_len {
+    if store.packages.len() == original_len && !had_tool_dir && !had_shim {
         bail!("package `{package}` is not globally installed");
     }
 
-    global_home.save_tools(&store)?;
-
-    let shim_path = global_home.shim_path(&package);
-    if shim_path.exists() {
-        fs::remove_file(&shim_path)
-            .with_context(|| format!("failed to remove shim {}", shim_path.display()))?;
+    if store.packages.len() != original_len {
+        global_home.save_tools(&store)?;
     }
+    remove_path_if_exists(&tool_dir)?;
+    remove_path_if_exists(&shim_path)?;
 
     println!("package: {package}");
     println!("scope: global");
     println!("status: uninstalled");
     println!("shim: {}", shim_path.display());
+
+    Ok(())
+}
+
+fn ensure_workspace_package_installed(
+    workspace: &Workspace,
+    package: &str,
+) -> Result<PackageInstallResult> {
+    if !workspace.is_initialized() {
+        workspace.init_with_options(InitOptions::default())?;
+    }
+
+    let mut store = workspace.load_tools()?;
+    let entry_path = workspace.tool_entry_path(package);
+    let already_on_disk = entry_path.is_file();
+
+    if !already_on_disk {
+        ensure_install_target_ready(&workspace.tool_dir(package), &entry_path, package)?;
+        install_tool_from_hub(package, &workspace.tool_dir(package))?;
+    }
+
+    let manifest_updated = upsert_package_record(&mut store, package);
+    if manifest_updated {
+        workspace.save_tools(&store)?;
+    }
+
+    Ok(PackageInstallResult {
+        entry_path,
+        status: if already_on_disk && !manifest_updated {
+            PackageInstallStatus::AlreadyInstalled
+        } else {
+            PackageInstallStatus::Installed
+        },
+    })
+}
+
+fn ensure_global_package_installed(
+    global_home: &GlobalHome,
+    package: &str,
+) -> Result<PackageInstallResult> {
+    global_home.init()?;
+
+    let mut store = global_home.load_tools()?;
+    let entry_path = global_home.tool_entry_path(package);
+    let already_on_disk = entry_path.is_file();
+
+    if !already_on_disk {
+        ensure_install_target_ready(&global_home.tool_dir(package), &entry_path, package)?;
+        install_tool_from_hub(package, &global_home.tool_dir(package))?;
+    }
+
+    let manifest_updated = upsert_package_record(&mut store, package);
+    if manifest_updated {
+        global_home.save_tools(&store)?;
+    }
+
+    Ok(PackageInstallResult {
+        entry_path,
+        status: if already_on_disk && !manifest_updated {
+            PackageInstallStatus::AlreadyInstalled
+        } else {
+            PackageInstallStatus::Installed
+        },
+    })
+}
+
+fn ensure_install_target_ready(tool_dir: &Path, entry_path: &Path, package: &str) -> Result<()> {
+    if !tool_dir.exists() {
+        return Ok(());
+    }
+
+    if entry_path.is_file() {
+        return Ok(());
+    }
+
+    bail!(
+        "tool directory for `{package}` already exists at {}, but `{}` is missing",
+        tool_dir.display(),
+        entry_path.display()
+    );
+}
+
+fn upsert_package_record(store: &mut crate::workspace::ToolStore, package: &str) -> bool {
+    if package_exists(store, package) {
+        return false;
+    }
+
+    store.packages.push(InstalledPackage {
+        name: package.to_string(),
+        version: None,
+        path: None,
+    });
+    store
+        .packages
+        .sort_by(|left, right| left.name.cmp(&right.name));
+    true
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    if path.is_dir() {
+        fs::remove_dir_all(path)
+            .with_context(|| format!("failed to remove directory {}", path.display()))?;
+    } else {
+        fs::remove_file(path)
+            .with_context(|| format!("failed to remove file {}", path.display()))?;
+    }
 
     Ok(())
 }
@@ -781,6 +889,15 @@ fn resolve_workspace_tool_target(workspace: &Workspace, target: &str) -> Option<
     }
 }
 
+fn resolve_global_tool_target(global_home: &GlobalHome, target: &str) -> Option<PathBuf> {
+    let entry = global_home.tool_entry_path(target);
+    if entry.exists() {
+        Some(entry)
+    } else {
+        None
+    }
+}
+
 fn load_tool_info(
     workspace: &Workspace,
     global_home: &GlobalHome,
@@ -798,6 +915,10 @@ fn load_tool_info(
         return build_builtin_tool_info(target);
     }
 
+    if let Some(script_path) = resolve_global_tool_target(global_home, target) {
+        return build_tool_info("global-tool", script_path);
+    }
+
     if package_exists(&workspace.load_tools_or_default()?, target) {
         bail!(
             "tool `{target}` is registered in the workspace, but no script entry was found at {}",
@@ -807,7 +928,8 @@ fn load_tool_info(
 
     if package_exists(&global_home.load_tools()?, target) {
         bail!(
-            "tool `{target}` is installed globally, but its local script metadata is not available yet"
+            "tool `{target}` is registered globally, but no script entry was found at {}",
+            global_home.tool_entry_path(target).display()
         );
     }
 
@@ -919,15 +1041,20 @@ fn resolve_run_target(workspace: &Workspace, target: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::{
-        env, fs, process,
+        env, fs,
+        ffi::OsString,
+        process::{self, Command},
+        sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use tokio::sync::Semaphore;
 
     use super::*;
+    use crate::tool_hub::{OPENWALK_HUB_GIT_REF_ENV, OPENWALK_HUB_GIT_URL_ENV};
 
     static CWD_LOCK: Semaphore = Semaphore::const_new(1);
+    static HUB_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct TestDir {
         path: PathBuf,
@@ -950,6 +1077,93 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    struct LocalHubRepo {
+        _sandbox: TestDir,
+        path: PathBuf,
+    }
+
+    impl LocalHubRepo {
+        fn with_tool(name: &str, body: &str) -> Self {
+            let sandbox = TestDir::new();
+            let path = sandbox.path.join("hub");
+            fs::create_dir_all(path.join("tools").join(name))
+                .expect("hub tool directory should be created");
+            fs::write(path.join("tools").join(name).join("main.scm"), body)
+                .expect("hub tool script should be written");
+
+            run_git(&path, &["init"]);
+            run_git(&path, &["checkout", "-b", "main"]);
+            run_git(&path, &["add", "."]);
+            run_git(
+                &path,
+                &[
+                    "-c",
+                    "user.name=OpenWalk Tests",
+                    "-c",
+                    "user.email=tests@example.com",
+                    "commit",
+                    "-m",
+                    "initial hub fixture",
+                ],
+            );
+
+            Self {
+                _sandbox: sandbox,
+                path,
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    fn run_git(repo_dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo_dir)
+            .output()
+            .expect("git command should launch in tests");
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn install_test_hub_tool(name: &str, body: &str) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
+        let repo = LocalHubRepo::with_tool(name, body);
+        let url_guard =
+            EnvVarGuard::set(OPENWALK_HUB_GIT_URL_ENV, repo.path().to_str().expect("utf8 path"));
+        let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
+        (repo, url_guard, ref_guard)
     }
 
     fn initialized_workspace() -> (TestDir, Workspace) {
@@ -1054,7 +1268,29 @@ mod tests {
 
     #[test]
     fn install_and_uninstall_package_updates_store() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
         let (_sandbox, workspace) = initialized_workspace();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "browser-tools",
+            r#"#| @meta
+{
+  "name": "browser-tools",
+  "description": "Hub fixture workspace tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk exec browser-tools"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "workspace-ok")
+"#,
+        );
 
         install_package(&workspace, "browser-tools".to_string()).expect("install should succeed");
         let installed = workspace
@@ -1068,6 +1304,7 @@ mod tests {
                 path: None,
             }]
         );
+        assert!(workspace.tool_entry_path("browser-tools").exists());
 
         uninstall_package(&workspace, "browser-tools".to_string())
             .expect("uninstall should succeed");
@@ -1075,12 +1312,35 @@ mod tests {
             .load_tools()
             .expect("tools should load after uninstall");
         assert!(after_uninstall.packages.is_empty());
+        assert!(!workspace.tool_dir("browser-tools").exists());
     }
 
     #[test]
     fn handle_tool_add_and_remove_updates_store() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
         let (_workspace_sandbox, workspace) = initialized_workspace();
         let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "browser-tools",
+            r#"#| @meta
+{
+  "name": "browser-tools",
+  "description": "Hub fixture workspace tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk tool add browser-tools"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "workspace-ok")
+"#,
+        );
 
         handle_tool_command(
             &workspace,
@@ -1102,6 +1362,7 @@ mod tests {
                 path: None,
             }]
         );
+        assert!(workspace.tool_entry_path("browser-tools").exists());
 
         handle_tool_command(
             &workspace,
@@ -1116,12 +1377,35 @@ mod tests {
             .load_tools()
             .expect("tools should load after tool remove");
         assert!(after_remove.packages.is_empty());
+        assert!(!workspace.tool_dir("browser-tools").exists());
     }
 
     #[test]
     fn handle_tool_install_and_uninstall_updates_global_store_and_shim() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
         let (_workspace_sandbox, workspace) = initialized_workspace();
         let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "browser-tools",
+            r#"#| @meta
+{
+  "name": "browser-tools",
+  "description": "Hub fixture global tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk tool install browser-tools"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "global-ok")
+"#,
+        );
 
         handle_tool_command(
             &workspace,
@@ -1143,6 +1427,7 @@ mod tests {
                 path: None,
             }]
         );
+        assert!(global_home.tool_entry_path("browser-tools").exists());
         assert!(global_home.shim_path("browser-tools").exists());
 
         handle_tool_command(
@@ -1159,6 +1444,7 @@ mod tests {
             .expect("global tools should load after tool uninstall");
         assert!(after_uninstall.packages.is_empty());
         assert!(!global_home.shim_path("browser-tools").exists());
+        assert!(!global_home.tool_dir("browser-tools").exists());
     }
 
     #[test]
@@ -1196,6 +1482,45 @@ mod tests {
         assert_eq!(info.name, "bing-search");
         assert_eq!(info.source, "workspace-tool");
         assert_eq!(info.metadata.description, "Bing 搜索");
+    }
+
+    #[test]
+    fn load_tool_info_reads_global_script_metadata() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let workspace_sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+        let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "global-bing-search",
+            r#"#| @meta
+{
+  "name": "global-bing-search",
+  "description": "全局 Bing 搜索",
+  "args": [],
+  "returns": {
+    "type": "object",
+    "description": "{ results[] }"
+  },
+  "examples": ["openwalk exec global-bing-search"],
+  "domains": ["www.bing.com"],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["search"]
+}
+|#
+(define (main args) "ok")
+"#,
+        );
+
+        install_global_package(&global_home, "global-bing-search".to_string())
+            .expect("global install should succeed");
+
+        let info = load_tool_info(&workspace, &global_home, "global-bing-search")
+            .expect("global tool info should load");
+
+        assert_eq!(info.name, "global-bing-search");
+        assert_eq!(info.source, "global-tool");
+        assert_eq!(info.metadata.description, "全局 Bing 搜索");
     }
 
     #[test]
@@ -1311,9 +1636,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exec_tool_allows_remote_fallback_for_unknown_tools() {
-        let (_workspace_sandbox, workspace) = initialized_workspace();
+    async fn exec_tool_auto_installs_unknown_tools_from_hub() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let workspace_sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
         let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "remote.browser.open",
+            r#"#| @meta
+{
+  "name": "remote.browser.open",
+  "description": "Remote fixture tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk exec remote.browser.open"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "remote-ok")
+"#,
+        );
 
         exec_tool(
             &workspace,
@@ -1324,7 +1672,13 @@ mod tests {
             },
         )
         .await
-        .expect("exec should allow remote fallback");
+        .expect("exec should install and run the hub tool");
+
+        let installed = workspace
+            .load_tools()
+            .expect("tools should load after remote exec install");
+        assert!(package_exists(&installed, "remote.browser.open"));
+        assert!(workspace.tool_entry_path("remote.browser.open").exists());
     }
 
     #[tokio::test]
@@ -1347,9 +1701,31 @@ mod tests {
 
     #[tokio::test]
     async fn exec_tool_allows_global_packages_without_workspace_init() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
         let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "browser-tools",
+            r#"#| @meta
+{
+  "name": "browser-tools",
+  "description": "Global fixture tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk exec browser-tools"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "global-ok")
+"#,
+        );
 
         install_global_package(&global_home, "browser-tools".to_string())
             .expect("global install should succeed");
@@ -1364,6 +1740,8 @@ mod tests {
         )
         .await
         .expect("exec should allow globally installed packages without a workspace");
+
+        assert!(!workspace.is_initialized());
     }
 
     #[tokio::test]

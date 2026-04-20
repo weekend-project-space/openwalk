@@ -3,6 +3,7 @@ mod browser;
 mod cli;
 mod output;
 mod scheme_runtime;
+mod tool_hub;
 mod tool_metadata;
 mod workspace;
 

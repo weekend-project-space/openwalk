@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 const WORKSPACE_DIR: &str = ".openwalk";
 const OPENWALK_HOME_ENV: &str = "OPENWALK_HOME";
 const MANIFEST_FILE: &str = "openwalk.json";
+const GLOBAL_REPO_DIR: &str = "repo";
 const LEGACY_CONFIG_FILE: &str = "config.json";
-const TOOLS_FILE: &str = "tools.json";
 const TOOLS_DIR: &str = "tools";
 const BIN_DIR: &str = "bin";
 const RUN_DIR: &str = "run";
@@ -94,6 +94,12 @@ pub struct ToolStore {
     pub packages: Vec<InstalledPackage>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+struct GlobalManifest {
+    #[serde(default)]
+    tools: BTreeMap<String, ToolDependency>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalTool {
     pub name: String,
@@ -106,6 +112,16 @@ pub struct InitSummary {
     pub created_root: bool,
     pub created_manifest: bool,
     pub created_tool_dir: bool,
+    pub overwritten_manifest: bool,
+    pub backup_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+// Options the CLI forwards to `Workspace::init_with_options`.
+pub struct InitOptions {
+    pub name: Option<String>,
+    pub tools: Vec<String>,
+    pub force: bool,
 }
 
 impl Workspace {
@@ -181,7 +197,12 @@ impl Workspace {
         Ok(tools)
     }
 
+    #[cfg(test)]
     pub fn init(&self) -> Result<InitSummary> {
+        self.init_with_options(InitOptions::default())
+    }
+
+    pub fn init_with_options(&self, options: InitOptions) -> Result<InitSummary> {
         let created_root = if self.root.exists() {
             false
         } else {
@@ -192,16 +213,32 @@ impl Workspace {
         };
 
         let manifest_path = self.manifest_path();
-        let created_manifest = if manifest_path.exists() {
-            false
-        } else {
-            let manifest = if self.legacy_is_initialized() {
-                self.import_legacy_manifest()?
-            } else {
-                WorkspaceManifest::for_workspace(self.base_dir())
-            };
+        let has_manifest_options = options.name.is_some() || !options.tools.is_empty();
+
+        let (created_manifest, overwritten_manifest, backup_path) = if !manifest_path.exists() {
+            let manifest = self.build_fresh_manifest(&options)?;
             self.write_json(&manifest_path, &manifest)?;
-            true
+            (true, false, None)
+        } else if options.force {
+            let backup = self.base_dir.join(format!("{MANIFEST_FILE}.bak"));
+            fs::rename(&manifest_path, &backup).with_context(|| {
+                format!(
+                    "failed to back up {} to {}",
+                    manifest_path.display(),
+                    backup.display()
+                )
+            })?;
+            let manifest = self.build_fresh_manifest(&options)?;
+            self.write_json(&manifest_path, &manifest)?;
+            (false, true, Some(backup))
+        } else if has_manifest_options {
+            bail!(
+                "workspace already initialized at {}. Pass `--force` to reset or edit `{}` directly.",
+                self.root.display(),
+                manifest_path.display()
+            );
+        } else {
+            (false, false, None)
         };
 
         let tools_dir = self.tools_dir();
@@ -221,7 +258,36 @@ impl Workspace {
             created_root,
             created_manifest,
             created_tool_dir,
+            overwritten_manifest,
+            backup_path,
         })
+    }
+
+    fn build_fresh_manifest(&self, options: &InitOptions) -> Result<WorkspaceManifest> {
+        let mut manifest = if self.legacy_is_initialized() {
+            self.import_legacy_manifest()?
+        } else {
+            WorkspaceManifest::for_workspace(self.base_dir())
+        };
+
+        if let Some(name) = options.name.as_deref() {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                bail!("`--name` must not be empty");
+            }
+            manifest.package.name = trimmed.to_string();
+        }
+
+        for tool in options
+            .tools
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            manifest.tools.entry(tool.to_string()).or_default();
+        }
+
+        Ok(manifest)
     }
 
     pub fn ensure_initialized(&self) -> Result<()> {
@@ -297,15 +363,11 @@ impl Workspace {
     }
 
     fn legacy_is_initialized(&self) -> bool {
-        self.legacy_config_path().exists() && self.legacy_tools_path().exists()
+        self.legacy_config_path().exists()
     }
 
     fn legacy_config_path(&self) -> PathBuf {
         self.root.join(LEGACY_CONFIG_FILE)
-    }
-
-    fn legacy_tools_path(&self) -> PathBuf {
-        self.root.join(TOOLS_FILE)
     }
 
     fn import_legacy_manifest(&self) -> Result<WorkspaceManifest> {
@@ -330,25 +392,10 @@ impl Workspace {
             PackageManifest::for_workspace(self.base_dir())
         };
 
-        let tools = if self.legacy_tools_path().exists() {
-            let data = fs::read_to_string(self.legacy_tools_path()).with_context(|| {
-                format!(
-                    "failed to read legacy tool store {}",
-                    self.legacy_tools_path().display()
-                )
-            })?;
-            let store: ToolStore = serde_json::from_str(&data).with_context(|| {
-                format!(
-                    "failed to parse legacy tool store {}",
-                    self.legacy_tools_path().display()
-                )
-            })?;
-            tool_store_to_manifest_map(&store)
-        } else {
-            BTreeMap::new()
-        };
-
-        Ok(WorkspaceManifest { package, tools })
+        Ok(WorkspaceManifest {
+            package,
+            tools: BTreeMap::new(),
+        })
     }
 
     fn write_json<P, T>(&self, path: P, value: &T) -> Result<()>
@@ -391,6 +438,18 @@ impl GlobalHome {
         self.root.join(BIN_DIR)
     }
 
+    pub fn tools_dir(&self) -> PathBuf {
+        self.root.join(GLOBAL_REPO_DIR).join(TOOLS_DIR)
+    }
+
+    pub fn tool_dir(&self, tool_name: &str) -> PathBuf {
+        self.tools_dir().join(tool_name)
+    }
+
+    pub fn tool_entry_path(&self, tool_name: &str) -> PathBuf {
+        self.tool_dir(tool_name).join(TOOL_ENTRY_FILE)
+    }
+
     pub fn browser_profiles_dir(&self) -> PathBuf {
         self.root.join(BROWSER_PROFILES_DIR)
     }
@@ -415,10 +474,6 @@ impl GlobalHome {
         self.browser_profile_dir(DEFAULT_BROWSER_PROFILE)
     }
 
-    pub fn is_initialized(&self) -> bool {
-        self.root.exists() && self.tools_path().exists() && self.bin_dir().exists()
-    }
-
     pub fn init(&self) -> Result<()> {
         if !self.root.exists() {
             fs::create_dir_all(&self.root).with_context(|| {
@@ -426,9 +481,9 @@ impl GlobalHome {
             })?;
         }
 
-        let tools_path = self.tools_path();
-        if !tools_path.exists() {
-            self.write_json(&tools_path, &ToolStore::default())?;
+        let manifest_path = self.manifest_path();
+        if !manifest_path.exists() {
+            self.write_json(&manifest_path, &GlobalManifest::default())?;
         }
 
         let bin_dir = self.bin_dir();
@@ -437,6 +492,16 @@ impl GlobalHome {
                 format!(
                     "failed to create global bin directory at {}",
                     bin_dir.display()
+                )
+            })?;
+        }
+
+        let tools_dir = self.tools_dir();
+        if !tools_dir.exists() {
+            fs::create_dir_all(&tools_dir).with_context(|| {
+                format!(
+                    "failed to create global tools directory at {}",
+                    tools_dir.display()
                 )
             })?;
         }
@@ -465,20 +530,21 @@ impl GlobalHome {
     }
 
     pub fn load_tools(&self) -> Result<ToolStore> {
-        if !self.is_initialized() {
+        let manifest_path = self.manifest_path();
+        if !manifest_path.exists() {
             return Ok(ToolStore::default());
         }
 
-        let data = fs::read_to_string(self.tools_path())
-            .with_context(|| format!("failed to read {}", self.tools_path().display()))?;
-        let store = serde_json::from_str(&data)
-            .with_context(|| format!("failed to parse {}", self.tools_path().display()))?;
-        Ok(store)
+        let data = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+        let manifest: GlobalManifest = serde_json::from_str(&data)
+            .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+        Ok(global_manifest_to_tool_store(manifest))
     }
 
     pub fn save_tools(&self, store: &ToolStore) -> Result<()> {
         self.init()?;
-        self.write_json(self.tools_path(), store)
+        self.write_json(self.manifest_path(), &tool_store_to_global_manifest(store))
     }
 
     pub fn shim_path(&self, package: &str) -> PathBuf {
@@ -495,8 +561,8 @@ impl GlobalHome {
         }
     }
 
-    fn tools_path(&self) -> PathBuf {
-        self.root.join(TOOLS_FILE)
+    fn manifest_path(&self) -> PathBuf {
+        self.root.join(MANIFEST_FILE)
     }
 
     fn write_json<P, T>(&self, path: P, value: &T) -> Result<()>
@@ -537,6 +603,26 @@ fn tool_store_to_manifest_map(store: &ToolStore) -> BTreeMap<String, ToolDepende
         );
     }
     tools
+}
+
+fn global_manifest_to_tool_store(manifest: GlobalManifest) -> ToolStore {
+    let mut packages = manifest
+        .tools
+        .into_iter()
+        .map(|(name, dependency)| InstalledPackage {
+            name,
+            version: dependency.version,
+            path: dependency.path,
+        })
+        .collect::<Vec<_>>();
+    packages.sort_by(|left, right| left.name.cmp(&right.name));
+    ToolStore { packages }
+}
+
+fn tool_store_to_global_manifest(store: &ToolStore) -> GlobalManifest {
+    GlobalManifest {
+        tools: tool_store_to_manifest_map(store),
+    }
 }
 
 fn default_package_name(base_dir: &Path) -> String {
@@ -670,23 +756,122 @@ mod tests {
     }
 
     #[test]
-    fn load_manifest_migrates_legacy_workspace_files() {
+    fn load_manifest_migrates_legacy_workspace_config() {
         let sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(sandbox.path.clone());
         fs::create_dir_all(&workspace.root).expect("runtime dir should exist");
         fs::create_dir_all(workspace.tools_dir()).expect("tools dir should exist");
         fs::write(workspace.legacy_config_path(), r#"{"version":"0.9.0"}"#)
             .expect("legacy config should be written");
-        fs::write(
-            workspace.legacy_tools_path(),
-            r#"{"packages":[{"name":"browser-tools"}]}"#,
-        )
-        .expect("legacy tools should be written");
 
         let manifest = workspace.load_manifest().expect("manifest should import");
         assert_eq!(manifest.package.version, "0.9.0");
-        assert_eq!(manifest.tools.len(), 1);
-        assert!(manifest.tools.contains_key("browser-tools"));
+        assert!(manifest.tools.is_empty());
+    }
+
+    #[test]
+    fn init_with_options_applies_name_and_tools_on_fresh_workspace() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+
+        let summary = workspace
+            .init_with_options(InitOptions {
+                name: Some("my-walk".to_string()),
+                tools: vec!["v2ex-hot".to_string(), "bing-search".to_string()],
+                force: false,
+            })
+            .expect("workspace should initialize with options");
+
+        assert!(summary.created_manifest);
+        assert!(!summary.overwritten_manifest);
+        assert!(summary.backup_path.is_none());
+
+        let manifest = workspace.load_manifest().expect("manifest should load");
+        assert_eq!(manifest.package.name, "my-walk");
+        assert_eq!(manifest.tools.len(), 2);
+        assert!(manifest.tools.contains_key("v2ex-hot"));
+        assert!(manifest.tools.contains_key("bing-search"));
+    }
+
+    #[test]
+    fn init_with_options_rejects_rename_on_existing_without_force() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace.init().expect("initial init should succeed");
+
+        let error = workspace
+            .init_with_options(InitOptions {
+                name: Some("renamed".to_string()),
+                ..InitOptions::default()
+            })
+            .expect_err("rename without --force should be rejected");
+
+        assert!(error.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn init_with_options_force_backs_up_and_rewrites_manifest() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace.init().expect("initial init should succeed");
+
+        let original = fs::read_to_string(workspace.manifest_path())
+            .expect("original manifest should be readable");
+
+        let summary = workspace
+            .init_with_options(InitOptions {
+                name: Some("renamed".to_string()),
+                tools: vec!["bing-search".to_string()],
+                force: true,
+            })
+            .expect("force reinit should succeed");
+
+        assert!(summary.overwritten_manifest);
+        assert!(!summary.created_manifest);
+        let backup = summary.backup_path.expect("backup path should be reported");
+        assert_eq!(
+            fs::read_to_string(&backup).expect("backup file should be readable"),
+            original
+        );
+
+        let manifest = workspace.load_manifest().expect("manifest should load");
+        assert_eq!(manifest.package.name, "renamed");
+        assert!(manifest.tools.contains_key("bing-search"));
+    }
+
+    #[test]
+    fn init_with_options_force_heals_corrupted_manifest() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace.init().expect("initial init should succeed");
+
+        fs::write(workspace.manifest_path(), "not valid json")
+            .expect("manifest should be overwritten with garbage");
+
+        workspace
+            .init_with_options(InitOptions {
+                force: true,
+                ..InitOptions::default()
+            })
+            .expect("force reinit should heal corrupted manifest");
+
+        workspace
+            .load_manifest()
+            .expect("manifest should load after force reinit");
+    }
+
+    #[test]
+    fn init_with_options_rejects_empty_name() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+
+        let error = workspace
+            .init_with_options(InitOptions {
+                name: Some("   ".to_string()),
+                ..InitOptions::default()
+            })
+            .expect_err("blank name should be rejected");
+        assert!(error.to_string().contains("--name"));
     }
 
     #[test]
@@ -713,6 +898,8 @@ mod tests {
         global_home.init().expect("global home should initialize");
 
         assert!(global_home.root.exists());
+        assert!(global_home.manifest_path().exists());
+        assert!(global_home.tools_dir().exists());
         assert!(global_home.bin_dir().exists());
         assert!(global_home.default_browser_profile_dir().exists());
         assert_eq!(
@@ -759,6 +946,32 @@ mod tests {
         let loaded = global_home
             .load_tools()
             .expect("global tool store should load");
+        assert_eq!(loaded, store);
+    }
+
+    #[test]
+    fn global_home_load_tools_reads_manifest_even_if_repo_tools_dir_missing() {
+        let sandbox = TestDir::new();
+        let global_home = GlobalHome::from_root(sandbox.path.join("global-home"));
+        global_home.init().expect("global home should initialize");
+
+        let store = ToolStore {
+            packages: vec![InstalledPackage {
+                name: "keep-me".to_string(),
+                version: None,
+                path: None,
+            }],
+        };
+        global_home
+            .save_tools(&store)
+            .expect("global tool store should be saved");
+
+        fs::remove_dir_all(global_home.tools_dir())
+            .expect("global repo/tools dir should be removed");
+
+        let loaded = global_home
+            .load_tools()
+            .expect("global tool store should still load from manifest");
         assert_eq!(loaded, store);
     }
 }

@@ -18,7 +18,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize an openwalk workspace in the current directory.
-    Init,
+    Init(InitArgs),
     /// Run a workspace tool name or local Scheme script file. Built-in host functions use `exec`.
     Run(ToolExecArgs),
     /// Execute a built-in host function, local Scheme script file, or tool entry.
@@ -28,6 +28,26 @@ pub enum Command {
         #[command(subcommand)]
         command: ToolCommand,
     },
+}
+
+#[derive(Debug, Args)]
+/// Flags accepted by `openwalk init`.
+pub struct InitArgs {
+    /// Override the package name written to openwalk.json.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Pre-populate the tools map with comma-separated names, e.g. --tools=v2ex-hot,bing-search
+    #[arg(long, value_delimiter = ',')]
+    pub tools: Vec<String>,
+
+    /// Overwrite an existing openwalk.json (the previous file is backed up to openwalk.json.bak).
+    #[arg(long)]
+    pub force: bool,
+
+    /// Output format: yaml (default), md, or json.
+    #[arg(short = 'f', long = "format", default_value = "yaml")]
+    pub format: String,
 }
 
 #[derive(Debug, Args)]
@@ -82,6 +102,44 @@ pub enum ToolCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_init_with_name_tools_and_force() {
+        let cli = Cli::try_parse_from([
+            "openwalk",
+            "init",
+            "--name=my-walk",
+            "--tools=v2ex-hot,bing-search",
+            "--force",
+            "--format=json",
+        ])
+        .expect("init command should parse");
+
+        match cli.command {
+            Command::Init(args) => {
+                assert_eq!(args.name.as_deref(), Some("my-walk"));
+                assert_eq!(args.tools, vec!["v2ex-hot", "bing-search"]);
+                assert!(args.force);
+                assert_eq!(args.format, "json");
+            }
+            other => panic!("expected init command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_init_without_flags_uses_defaults() {
+        let cli = Cli::try_parse_from(["openwalk", "init"]).expect("bare init should parse");
+
+        match cli.command {
+            Command::Init(args) => {
+                assert!(args.name.is_none());
+                assert!(args.tools.is_empty());
+                assert!(!args.force);
+                assert_eq!(args.format, "yaml");
+            }
+            other => panic!("expected init command, got {other:?}"),
+        }
+    }
 
     #[test]
     fn parses_run_command_with_trailing_args() {
