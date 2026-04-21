@@ -131,6 +131,7 @@ mod tests {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         for relative_path in [
             ".openwalk/tools/bing-search/main.scm",
+            ".openwalk/tools/hello-word/main.scm",
             ".openwalk/tools/v2ex-hot/main.scm",
         ] {
             let script_path = repo_root.join(relative_path);

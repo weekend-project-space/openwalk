@@ -19,6 +19,8 @@ pub struct Cli {
 pub enum Command {
     /// Initialize an openwalk workspace in the current directory.
     Init(InitArgs),
+    /// Install project tools into the current workspace.
+    Install(ProjectInstallArgs),
     /// Run a workspace tool name or local Scheme script file. Built-in host functions use `exec`.
     Run(ToolExecArgs),
     /// Execute a built-in host function, local Scheme script file, or tool entry.
@@ -49,6 +51,10 @@ pub struct InitArgs {
     #[arg(short = 'f', long = "format", default_value = "yaml")]
     pub format: String,
 }
+
+#[derive(Debug, Args)]
+/// Flags accepted by `openwalk install`.
+pub struct ProjectInstallArgs {}
 
 #[derive(Debug, Args)]
 /// Shared argument shape for commands that dispatch a single tool invocation.
@@ -158,6 +164,17 @@ mod tests {
                 assert_eq!(args.args, vec!["https://example.com", "--headless"]);
             }
             other => panic!("expected run command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_install_without_packages() {
+        let cli = Cli::try_parse_from(["openwalk", "install"])
+            .expect("install without package names should parse");
+
+        match cli.command {
+            Command::Install(_) => {}
+            other => panic!("expected install command, got {other:?}"),
         }
     }
 

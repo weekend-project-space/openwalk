@@ -12,7 +12,7 @@ use crate::{
         attach_browser_session_with_options, ensure_browser_session_with_options, BrowserService,
         BrowserSessionLaunchOptions, EphemeralLaunchOptions,
     },
-    cli::{Cli, Command, InitArgs, ToolCommand, ToolExecArgs},
+    cli::{Cli, Command, InitArgs, ProjectInstallArgs, ToolCommand, ToolExecArgs},
     output::{normalize_result_value, parse_output_format, print_execution_result, OutputFormat},
     scheme_runtime,
     tool_hub::install_tool_from_hub,
@@ -105,6 +105,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             let workspace = Workspace::discover()?;
             init_workspace(&workspace, args)
         }
+        Command::Install(args) => {
+            let workspace = Workspace::discover()?;
+            install_workspace_tools(&workspace, args)
+        }
         Command::Run(args) => run_local(args).await,
         Command::Exec(args) => {
             let workspace = Workspace::discover()?;
@@ -155,6 +159,12 @@ fn init_workspace(workspace: &Workspace, args: InitArgs) -> Result<()> {
     }
 
     print_execution_result(output_format, &payload)?;
+    Ok(())
+}
+
+fn install_workspace_tools(workspace: &Workspace, args: ProjectInstallArgs) -> Result<()> {
+    let _ = args;
+    install_declared_workspace_tools(workspace)?;
     Ok(())
 }
 
@@ -246,11 +256,85 @@ fn install_package(workspace: &Workspace, package: String) -> Result<()> {
 }
 
 fn uninstall_package(workspace: &Workspace, package: String) -> Result<()> {
-    workspace.ensure_initialized()?;
+    remove_workspace_package(workspace, &package)?;
+
+    println!("package: {package}");
+    println!("status: uninstalled");
+    println!("scope: workspace");
+
+    Ok(())
+}
+
+fn install_named_workspace_tools(workspace: &Workspace, packages: &[String]) -> Result<()> {
+    let mut installed = Vec::new();
+    let mut already_installed = Vec::new();
+
+    for package in packages {
+        let result = ensure_workspace_package_installed(workspace, package)?;
+        match result.status {
+            PackageInstallStatus::Installed => installed.push(package.clone()),
+            PackageInstallStatus::AlreadyInstalled => already_installed.push(package.clone()),
+        }
+    }
+
+    println!("scope: workspace");
+    println!("status: installed");
+    println!("requested: {}", packages.len());
+    println!("installed: {}", installed.len());
+    println!("already_installed: {}", already_installed.len());
+    println!("packages:");
+    for package in packages {
+        let state = if installed.iter().any(|item| item == package) {
+            "installed"
+        } else {
+            "already installed"
+        };
+        println!("  - {package} | {state}");
+    }
+
+    Ok(())
+}
+
+fn install_declared_workspace_tools(workspace: &Workspace) -> Result<()> {
+    ensure_workspace_manifest_available(workspace)?;
+    let store = workspace.load_tools()?;
+    let packages = store
+        .packages
+        .into_iter()
+        .map(|package| package.name)
+        .collect::<Vec<_>>();
+
+    if packages.is_empty() {
+        println!("scope: workspace");
+        println!("status: nothing to install");
+        println!("declared: 0");
+        return Ok(());
+    }
+
+    install_named_workspace_tools(workspace, &packages)
+}
+
+fn ensure_workspace_manifest_available(workspace: &Workspace) -> Result<()> {
+    if !workspace.manifest_path().exists() {
+        bail!(
+            "project manifest {} was not found. Run `openwalk init` first.",
+            workspace.manifest_path().display()
+        );
+    }
+
+    if !workspace.is_initialized() {
+        workspace.init_with_options(InitOptions::default())?;
+    }
+
+    Ok(())
+}
+
+fn remove_workspace_package(workspace: &Workspace, package: &str) -> Result<()> {
+    ensure_workspace_manifest_available(workspace)?;
     let mut store = workspace.load_tools()?;
     let original_len = store.packages.len();
     store.packages.retain(|item| item.name != package);
-    let tool_dir = workspace.tool_dir(&package);
+    let tool_dir = workspace.tool_dir(package);
     let had_files = tool_dir.exists();
 
     if store.packages.len() == original_len && !had_files {
@@ -261,10 +345,6 @@ fn uninstall_package(workspace: &Workspace, package: String) -> Result<()> {
         workspace.save_tools(&store)?;
     }
     remove_path_if_exists(&tool_dir)?;
-
-    println!("package: {package}");
-    println!("status: uninstalled");
-    println!("scope: workspace");
 
     Ok(())
 }
@@ -1109,12 +1189,18 @@ mod tests {
 
     impl LocalHubRepo {
         fn with_tool(name: &str, body: &str) -> Self {
+            Self::with_tools(&[(name, body)])
+        }
+
+        fn with_tools(tools: &[(&str, &str)]) -> Self {
             let sandbox = TestDir::new();
             let path = sandbox.path.join("hub");
-            fs::create_dir_all(path.join("tools").join(name))
-                .expect("hub tool directory should be created");
-            fs::write(path.join("tools").join(name).join("main.scm"), body)
-                .expect("hub tool script should be written");
+            for (name, body) in tools {
+                fs::create_dir_all(path.join("tools").join(name))
+                    .expect("hub tool directory should be created");
+                fs::write(path.join("tools").join(name).join("main.scm"), body)
+                    .expect("hub tool script should be written");
+            }
 
             run_git(&path, &["init"]);
             run_git(&path, &["checkout", "-b", "main"]);
@@ -1160,6 +1246,16 @@ mod tests {
 
     fn install_test_hub_tool(name: &str, body: &str) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
         let repo = LocalHubRepo::with_tool(name, body);
+        let url_guard =
+            EnvVarGuard::set(OPENWALK_HUB_GIT_URL_ENV, repo.path().to_str().expect("utf8 path"));
+        let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
+        (repo, url_guard, ref_guard)
+    }
+
+    fn install_test_hub_tools(
+        tools: &[(&str, &str)],
+    ) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
+        let repo = LocalHubRepo::with_tools(tools);
         let url_guard =
             EnvVarGuard::set(OPENWALK_HUB_GIT_URL_ENV, repo.path().to_str().expect("utf8 path"));
         let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
@@ -1313,6 +1409,80 @@ mod tests {
             .expect("tools should load after uninstall");
         assert!(after_uninstall.packages.is_empty());
         assert!(!workspace.tool_dir("browser-tools").exists());
+    }
+
+    #[test]
+    fn install_workspace_tools_installs_declared_manifest_packages() {
+        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace
+            .init_with_options(InitOptions {
+                tools: vec!["browser-tools".to_string(), "v2ex-tools".to_string()],
+                ..InitOptions::default()
+            })
+            .expect("workspace should initialize with declared tools");
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tools(&[
+            (
+                "browser-tools",
+                r#"#| @meta
+{
+  "name": "browser-tools",
+  "description": "Hub fixture workspace tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk install"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "workspace-ok")
+"#,
+            ),
+            (
+                "v2ex-tools",
+                r#"#| @meta
+{
+  "name": "v2ex-tools",
+  "description": "Second hub fixture tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk install"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "workspace-ok-2")
+"#,
+            ),
+        ]);
+
+        install_workspace_tools(&workspace, ProjectInstallArgs {})
+            .expect("top-level install should install declared tools");
+
+        assert!(workspace.tool_entry_path("browser-tools").exists());
+        assert!(workspace.tool_entry_path("v2ex-tools").exists());
+    }
+
+    #[test]
+    fn install_workspace_tools_without_manifest_fails() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+
+        let error = install_workspace_tools(&workspace, ProjectInstallArgs {})
+            .expect_err("install without manifest should fail");
+
+        assert!(error.to_string().contains("openwalk init"));
     }
 
     #[test]

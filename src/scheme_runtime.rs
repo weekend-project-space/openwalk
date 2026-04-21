@@ -222,8 +222,8 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
             description: "列出当前环境已记录的浏览器会话名称。".to_string(),
             args: Vec::new(),
             returns: ToolReturn {
-                return_type: "json-string".to_string(),
-                description: "按字母排序的会话名称数组 JSON 字符串。".to_string(),
+                return_type: "array".to_string(),
+                description: "按字母排序的会话名称字符串数组。".to_string(),
             },
             examples: vec!["openwalk exec browser-list".to_string()],
             domains: Vec::new(),
@@ -906,9 +906,9 @@ fn browser_list(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
     })?;
     let sessions = list_browser_sessions(&global_home)
         .map_err(|err| SchemeError::runtime(format!("failed to list browser sessions: {err:#}")))?;
-    let serialized = serde_json::to_string(&sessions)
-        .map_err(|err| SchemeError::runtime(format!("failed to encode browser sessions: {err}")))?;
-    Ok(Value::String(SchemeString::new(serialized)))
+    Ok(Value::vector(
+        sessions.into_iter().map(Value::string).collect(),
+    ))
 }
 
 fn browser_wait_timeout(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
@@ -1326,10 +1326,14 @@ fn maybe_alist_to_json_object(
 mod tests {
     use std::{
         env, fs, process,
+        ffi::OsString,
+        sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct TestDir {
         path: PathBuf,
@@ -1353,6 +1357,29 @@ mod tests {
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
         }
     }
 
@@ -1538,9 +1565,41 @@ mod tests {
 
         assert_eq!(metadata.name, "browser-list");
         assert_eq!(metadata.description, "列出当前环境已记录的浏览器会话名称。");
-        assert_eq!(metadata.returns.return_type, "json-string");
+        assert_eq!(metadata.returns.return_type, "array");
         assert!(metadata.args.is_empty());
         assert!(metadata.read_only);
+    }
+
+    #[test]
+    fn browser_list_returns_scheme_vector() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock should be acquired");
+        let sandbox = TestDir::new();
+        let global_home_root = sandbox.path.join("global-home");
+        let _openwalk_home =
+            EnvVarGuard::set("OPENWALK_HOME", global_home_root.to_str().expect("utf8 path"));
+
+        let global_home = GlobalHome::discover().expect("global home should resolve");
+        global_home.init().expect("global home should initialize");
+
+        for session_name in ["qa", "default"] {
+            let session_dir = global_home.browser_session_dir(session_name);
+            fs::create_dir_all(&session_dir).expect("session dir should be created");
+            fs::write(session_dir.join("session.json"), "{}")
+                .expect("session manifest should be written");
+        }
+
+        let value = browser_list(&Engine::new(Environment::standard()), &[])
+            .expect("browser-list should return a value");
+
+        let Value::Vector(items) = value else {
+            panic!("browser-list should return a vector");
+        };
+        let items = items.borrow();
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items.iter().map(expect_test_string).collect::<Vec<_>>(),
+            vec!["default".to_string(), "qa".to_string()]
+        );
     }
 
     #[test]
@@ -1639,5 +1698,12 @@ mod tests {
     fn scheme_builtin_list_contains_tracing_helpers() {
         assert!(SCHEME_BUILTINS.contains(&"tracing-start"));
         assert!(SCHEME_BUILTINS.contains(&"tracing-stop"));
+    }
+
+    fn expect_test_string(value: &Value) -> String {
+        match value {
+            Value::String(text) => text.to_plain_string(),
+            other => panic!("expected string, got {other}"),
+        }
     }
 }

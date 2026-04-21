@@ -139,8 +139,6 @@ Advanced example:
 cargo run -- run browser-advanced
 ```
 
-Open Baidu example:
-
 Search Bing example:
 
 ```bash
@@ -160,6 +158,9 @@ cargo run -- run v2ex-hot
 - `openwalk exec <package>`
   - 先按本地脚本 / 项目工具 / 内建 tool / 全局工具顺序解析
   - 都未命中时，会从 hub 拉取到当前项目后再执行，行为接近 `tool add + run`
+- `openwalk install`
+  - 按项目 `openwalk.json -> tools` 中声明的内容安装到 `.openwalk/tools/`
+  - 只负责落地已声明的项目 tools，不负责新增依赖
 - `openwalk tool add <package>` / `openwalk tool remove <package>`
   - 作用于项目根目录的 `openwalk.json -> tools`
   - 实际工具目录位于 `.openwalk/tools/<package>`
