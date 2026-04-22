@@ -161,6 +161,18 @@ impl BrowserActor {
             BrowserCommand::Hover { selector } => {
                 self.hover_locator(Locator::from_selector(selector)).await
             }
+            BrowserCommand::Upload { selector, files } => {
+                self.upload_locator(Locator::from_selector(selector), files)
+                    .await
+            }
+            BrowserCommand::Drag { source, target } => {
+                self.drag_between_locators(
+                    Locator::from_selector(source),
+                    Locator::from_selector(target),
+                )
+                .await
+            }
+            BrowserCommand::Snapshot => self.page_snapshot().await,
             BrowserCommand::Screenshot { path } => self.page_screenshot(path).await,
             BrowserCommand::ElementScreenshot { selector, path } => {
                 self.element_screenshot_locator(Locator::from_selector(selector), path)
@@ -221,7 +233,7 @@ impl BrowserActor {
             BrowserCommand::NetworkResponseBody { url_contains } => {
                 self.network_response_body(url_contains).await
             }
-            BrowserCommand::ConsoleList => self.console_list().await,
+            BrowserCommand::Console { min_level } => self.console(min_level).await,
             BrowserCommand::ConsoleClear => self.console_clear().await,
             BrowserCommand::InspectInfo { selector } => {
                 self.inspect_locator_info(Locator::css(selector)).await

@@ -27,6 +27,7 @@ use chromiumoxide::cdp::browser_protocol::{
     network::{CookieParam, DeleteCookiesParams},
     page::{CaptureScreenshotFormat, GetLayoutMetricsParams, PrintToPdfParams},
     performance::GetMetricsParams,
+    target::TargetId,
 };
 use chromiumoxide::keys::get_key_definition;
 use chromiumoxide::layout::Point;

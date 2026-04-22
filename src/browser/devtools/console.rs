@@ -25,6 +25,8 @@ impl BrowserActor {
             return Ok(());
         }
 
+        self.install_console_buffer_for_page(&page).await?;
+
         page.execute(RuntimeEnableParams::default())
             .await
             .with_context(|| format!("failed to enable runtime tracking for page `{page_id}`"))?;
@@ -106,12 +108,28 @@ impl BrowserActor {
         Ok(())
     }
 
-    pub(in crate::browser) async fn console_list(&mut self) -> Result<BrowserValue> {
+    pub(in crate::browser) async fn console(
+        &mut self,
+        min_level: Option<String>,
+    ) -> Result<BrowserValue> {
         let page = self.ensure_active_page().await?;
         self.ensure_console_tracking_for_page(page.clone()).await?;
+        tokio::time::sleep(Duration::from_millis(60)).await;
         let page_id = page.target_id().as_ref().to_string();
-        let entries = self.console_page_entries(page_id.as_str())?;
-        serialize_to_browser_value(&entries, "failed to serialize console entries")
+        let buffered_entries = self
+            .load_console_buffer_entries(&page, page_id.as_str())
+            .await
+            .unwrap_or_else(|_| self.console_page_entries(page_id.as_str()).unwrap_or_default());
+        let tracked_entries = self.console_page_entries(page_id.as_str()).unwrap_or_default();
+        let entries = merge_console_entries(buffered_entries, tracked_entries);
+        let base_timestamp = self
+            .page_time_origin_seconds(&page)
+            .await
+            .ok()
+            .or_else(|| entries.first().map(|entry| entry.timestamp));
+        let entries = filter_console_entries(entries, min_level.as_deref())?;
+        let lines = format_console_entries(entries.as_slice(), base_timestamp);
+        serialize_to_browser_value(&lines, "failed to serialize console entries")
     }
 
     pub(in crate::browser) async fn console_clear(&mut self) -> Result<BrowserValue> {
@@ -125,6 +143,7 @@ impl BrowserActor {
         page.execute(LogClearParams::default())
             .await
             .context("failed to clear browser log entries")?;
+        let _ = page.evaluate(CONSOLE_BUFFER_CLEAR_EVAL_JS).await;
 
         let mut state = self
             .console_state
@@ -148,6 +167,58 @@ impl BrowserActor {
             .lock()
             .map_err(|_| anyhow!("console log is not available"))?;
         Ok(state.page_entries(page_id))
+    }
+
+    async fn install_console_buffer_for_page(&self, page: &Page) -> Result<()> {
+        page.add_init_script(CONSOLE_BUFFER_INIT_SCRIPT)
+            .await
+            .context("failed to install console init script")?;
+        let _ = page.evaluate(CONSOLE_BUFFER_INSTALL_EVAL_JS).await;
+        Ok(())
+    }
+
+    async fn load_console_buffer_entries(
+        &self,
+        page: &Page,
+        page_id: &str,
+    ) -> Result<Vec<ConsoleEntry>> {
+        let mut value: serde_json::Value = page
+            .evaluate(CONSOLE_BUFFER_READ_EVAL_JS)
+            .await
+            .context("failed to read page console buffer")?
+            .into_value()
+            .context("page console buffer returned a non-serializable value")?;
+
+        let Some(items) = value.as_array_mut() else {
+            return Ok(Vec::new());
+        };
+
+        for (index, item) in items.iter_mut().enumerate() {
+            if let Some(object) = item.as_object_mut() {
+                object.insert(
+                    "sequence".to_string(),
+                    serde_json::Value::Number((index as u64).into()),
+                );
+                object.insert(
+                    "page_id".to_string(),
+                    serde_json::Value::String(page_id.to_string()),
+                );
+            }
+        }
+
+        serde_json::from_value(value).context("failed to decode page console buffer")
+    }
+
+    async fn page_time_origin_seconds(&self, page: &Page) -> Result<f64> {
+        let value: serde_json::Value = page
+            .evaluate("() => (typeof performance?.timeOrigin === 'number' ? performance.timeOrigin : Date.now()) / 1000")
+            .await
+            .context("failed to read page time origin")?
+            .into_value()
+            .context("page time origin returned a non-serializable value")?;
+        value
+            .as_f64()
+            .ok_or_else(|| anyhow!("page time origin did not return a number"))
     }
 }
 
@@ -330,6 +401,493 @@ fn remote_object_to_text(value: &RemoteObject) -> String {
     value.r#type.as_ref().to_string()
 }
 
+fn filter_console_entries(
+    entries: Vec<ConsoleEntry>,
+    min_level: Option<&str>,
+) -> Result<Vec<ConsoleEntry>> {
+    let Some(min_level) = min_level else {
+        return Ok(entries);
+    };
+
+    let threshold = console_level_rank(min_level).ok_or_else(|| {
+        anyhow!(
+            "unsupported console min-level `{min_level}`. Use one of: log, debug, info, warn, warning, error"
+        )
+    })?;
+
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            console_level_rank(entry.level.as_str())
+                .map(|rank| rank >= threshold)
+                .unwrap_or(false)
+        })
+        .collect())
+}
+
+fn console_level_rank(level: &str) -> Option<u8> {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "trace" | "verbose" | "log" | "debug" => Some(0),
+        "info" => Some(1),
+        "warn" | "warning" => Some(2),
+        "error" => Some(3),
+        _ => None,
+    }
+}
+
+fn merge_console_entries(
+    mut buffered_entries: Vec<ConsoleEntry>,
+    tracked_entries: Vec<ConsoleEntry>,
+) -> Vec<ConsoleEntry> {
+    if buffered_entries.is_empty() {
+        let mut entries = tracked_entries;
+        sort_console_entries(&mut entries);
+        return entries;
+    }
+
+    buffered_entries.extend(
+        tracked_entries
+            .into_iter()
+            .filter(|entry| entry.kind == "log"),
+    );
+    sort_console_entries(&mut buffered_entries);
+    buffered_entries
+}
+
+fn sort_console_entries(entries: &mut [ConsoleEntry]) {
+    entries.sort_by(|left, right| {
+        left.timestamp
+            .partial_cmp(&right.timestamp)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.sequence.cmp(&right.sequence))
+    });
+}
+
+fn format_console_entries(entries: &[ConsoleEntry], base_timestamp: Option<f64>) -> Vec<String> {
+    entries
+        .iter()
+        .map(|entry| format_console_entry(entry, base_timestamp))
+        .collect()
+}
+
+fn format_console_entry(entry: &ConsoleEntry, base_timestamp: Option<f64>) -> String {
+    let elapsed_ms = base_timestamp
+        .map(|base| ((entry.timestamp - base).max(0.0) * 1000.0).round() as u64)
+        .unwrap_or(0);
+    let prefix = format!(
+        "[{:>8}ms] [{}]",
+        elapsed_ms,
+        console_level_label(entry.level.as_str())
+    );
+    let location = console_entry_location(entry);
+
+    if let Some(location) = location {
+        if entry.text.contains('\n') {
+            format!("{prefix} {}\n @ {location}", entry.text)
+        } else {
+            format!("{prefix} {} @ {location}", entry.text)
+        }
+    } else {
+        format!("{prefix} {}", entry.text)
+    }
+}
+
+fn console_level_label(level: &str) -> &'static str {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "warning" | "warn" => "WARNING",
+        "error" => "ERROR",
+        "info" => "INFO",
+        "debug" => "DEBUG",
+        _ => "LOG",
+    }
+}
+
+fn console_entry_location(entry: &ConsoleEntry) -> Option<String> {
+    let url = entry.url.as_deref()?.trim();
+    if url.is_empty() {
+        return None;
+    }
+
+    match (entry.line_number, entry.column_number) {
+        (Some(line), Some(column)) => Some(format!("{url}:{line}:{column}")),
+        (Some(line), None) => Some(format!("{url}:{line}")),
+        _ => Some(url.to_string()),
+    }
+}
+
+const CONSOLE_BUFFER_INIT_SCRIPT: &str = r#"
+(() => {
+  if (window.__openwalkConsoleInstalled) {
+    return;
+  }
+  window.__openwalkConsoleInstalled = true;
+  window.__openwalkConsoleEntries = window.__openwalkConsoleEntries || [];
+  const maxEntries = 500;
+  const toText = (value) => {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (value instanceof Error) {
+      return value.stack || value.message || String(value);
+    }
+    try {
+      const encoded = JSON.stringify(value);
+      if (typeof encoded === "string") {
+        return encoded;
+      }
+    } catch (_) {}
+    return String(value);
+  };
+  const pushEntry = (entry) => {
+    try {
+      const list = window.__openwalkConsoleEntries || (window.__openwalkConsoleEntries = []);
+      list.push(entry);
+      if (list.length > maxEntries) {
+        list.splice(0, list.length - maxEntries);
+      }
+    } catch (_) {}
+  };
+  const levelForMethod = (method) => {
+    switch (method) {
+      case "warn":
+        return "warning";
+      case "error":
+        return "error";
+      case "info":
+        return "info";
+      case "debug":
+        return "debug";
+      default:
+        return "log";
+    }
+  };
+  const normalizeUrl = (value) => {
+    if (typeof value !== "string" || value.length === 0 || value === "<anonymous>" || value === "anonymous") {
+      return location.href;
+    }
+    return value;
+  };
+  const parseStackLocation = (stack) => {
+    const fallback = {
+      url: location.href,
+      line_number: null,
+      column_number: null
+    };
+    if (typeof stack !== "string") {
+      return fallback;
+    }
+    const frames = stack
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(1)
+      .map((line) => {
+        const match =
+          line.match(/^at .* \((.*):(\d+):(\d+)\)$/) ||
+          line.match(/^at (.*):(\d+):(\d+)$/) ||
+          line.match(/^(.*):(\d+):(\d+)$/);
+        if (!match) {
+          return null;
+        }
+        return {
+          raw: line,
+          url: normalizeUrl(match[1]),
+          line_number: Number(match[2]),
+          column_number: Number(match[3])
+        };
+      })
+      .filter(Boolean);
+    const preferred = frames.find(
+      (frame) =>
+        !/\bcaptureConsoleLocation\b/.test(frame.raw) &&
+        !/\bparseStackLocation\b/.test(frame.raw) &&
+        !/\bconsole\./.test(frame.raw) &&
+        !/\[as (log|info|warn|error|debug)\]/.test(frame.raw)
+    );
+    if (preferred) {
+      return {
+        url: preferred.url,
+        line_number: preferred.line_number,
+        column_number: preferred.column_number
+      };
+    }
+    if (frames.length > 0) {
+      return {
+        url: frames[0].url,
+        line_number: frames[0].line_number,
+        column_number: frames[0].column_number
+      };
+    }
+    return fallback;
+  };
+  const captureConsoleLocation = () => {
+    try {
+      throw new Error();
+    } catch (error) {
+      return parseStackLocation(error && error.stack);
+    }
+  };
+  for (const method of ["log", "info", "warn", "error", "debug"]) {
+    const original = typeof console[method] === "function" ? console[method].bind(console) : null;
+    if (!original) {
+      continue;
+    }
+    console[method] = (...args) => {
+      const textArgs = args.map(toText);
+      const stackLocation = captureConsoleLocation();
+      pushEntry({
+        kind: "console",
+        level: levelForMethod(method),
+        text: textArgs.join(" "),
+        args: textArgs,
+        event_type: method,
+        source: "runtime.console",
+        url: stackLocation.url,
+        line_number: stackLocation.line_number,
+        column_number: stackLocation.column_number,
+        context: null,
+        timestamp: Date.now() / 1000
+      });
+      return original(...args);
+    };
+  }
+  window.addEventListener(
+    "error",
+    (event) => {
+      const text = event.error
+        ? toText(event.error)
+        : (event.message || "Unhandled error");
+      const stackLocation = parseStackLocation(event.error && event.error.stack);
+      pushEntry({
+        kind: "exception",
+        level: "error",
+        text,
+        args: [text],
+        event_type: "exception-thrown",
+        source: "runtime.exception",
+        url: stackLocation.url || event.filename || location.href,
+        line_number: stackLocation.line_number ?? (typeof event.lineno === "number" ? event.lineno : null),
+        column_number: stackLocation.column_number ?? (typeof event.colno === "number" ? event.colno : null),
+        context: null,
+        timestamp: Date.now() / 1000
+      });
+    },
+    true
+  );
+  window.addEventListener(
+    "unhandledrejection",
+    (event) => {
+      const text = toText(event.reason);
+      const stackLocation = parseStackLocation(event.reason && event.reason.stack);
+      pushEntry({
+        kind: "exception",
+        level: "error",
+        text,
+        args: [text],
+        event_type: "unhandledrejection",
+        source: "runtime.exception",
+        url: stackLocation.url,
+        line_number: stackLocation.line_number,
+        column_number: stackLocation.column_number,
+        context: null,
+        timestamp: Date.now() / 1000
+      });
+    },
+    true
+  );
+})();
+"#;
+
+const CONSOLE_BUFFER_INSTALL_EVAL_JS: &str = r#"() => {
+    if (window.__openwalkConsoleInstalled) {
+        return true;
+    }
+    window.__openwalkConsoleInstalled = true;
+    window.__openwalkConsoleEntries = window.__openwalkConsoleEntries || [];
+    const maxEntries = 500;
+    const toText = (value) => {
+        if (typeof value === "string") {
+            return value;
+        }
+        if (value instanceof Error) {
+            return value.stack || value.message || String(value);
+        }
+        try {
+            const encoded = JSON.stringify(value);
+            if (typeof encoded === "string") {
+                return encoded;
+            }
+        } catch (_) {}
+        return String(value);
+    };
+    const pushEntry = (entry) => {
+        try {
+            const list = window.__openwalkConsoleEntries || (window.__openwalkConsoleEntries = []);
+            list.push(entry);
+            if (list.length > maxEntries) {
+                list.splice(0, list.length - maxEntries);
+            }
+        } catch (_) {}
+    };
+    const levelForMethod = (method) => {
+        switch (method) {
+            case "warn":
+                return "warning";
+            case "error":
+                return "error";
+            case "info":
+                return "info";
+            case "debug":
+                return "debug";
+            default:
+                return "log";
+        }
+    };
+    const normalizeUrl = (value) => {
+        if (typeof value !== "string" || value.length === 0 || value === "<anonymous>" || value === "anonymous") {
+            return location.href;
+        }
+        return value;
+    };
+    const parseStackLocation = (stack) => {
+        const fallback = {
+            url: location.href,
+            line_number: null,
+            column_number: null
+        };
+        if (typeof stack !== "string") {
+            return fallback;
+        }
+        const frames = stack
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .slice(1)
+            .map((line) => {
+                const match =
+                    line.match(/^at .* \((.*):(\d+):(\d+)\)$/) ||
+                    line.match(/^at (.*):(\d+):(\d+)$/) ||
+                    line.match(/^(.*):(\d+):(\d+)$/);
+                if (!match) {
+                    return null;
+                }
+                return {
+                    raw: line,
+                    url: normalizeUrl(match[1]),
+                    line_number: Number(match[2]),
+                    column_number: Number(match[3])
+                };
+            })
+            .filter(Boolean);
+        const preferred = frames.find(
+            (frame) =>
+                !/\bcaptureConsoleLocation\b/.test(frame.raw) &&
+                !/\bparseStackLocation\b/.test(frame.raw) &&
+                !/\bconsole\./.test(frame.raw) &&
+                !/\[as (log|info|warn|error|debug)\]/.test(frame.raw)
+        );
+        if (preferred) {
+            return {
+                url: preferred.url,
+                line_number: preferred.line_number,
+                column_number: preferred.column_number
+            };
+        }
+        if (frames.length > 0) {
+            return {
+                url: frames[0].url,
+                line_number: frames[0].line_number,
+                column_number: frames[0].column_number
+            };
+        }
+        return fallback;
+    };
+    const captureConsoleLocation = () => {
+        try {
+            throw new Error();
+        } catch (error) {
+            return parseStackLocation(error && error.stack);
+        }
+    };
+    for (const method of ["log", "info", "warn", "error", "debug"]) {
+        const original = typeof console[method] === "function" ? console[method].bind(console) : null;
+        if (!original) {
+            continue;
+        }
+        console[method] = (...args) => {
+            const textArgs = args.map(toText);
+            const stackLocation = captureConsoleLocation();
+            pushEntry({
+                kind: "console",
+                level: levelForMethod(method),
+                text: textArgs.join(" "),
+                args: textArgs,
+                event_type: method,
+                source: "runtime.console",
+                url: stackLocation.url,
+                line_number: stackLocation.line_number,
+                column_number: stackLocation.column_number,
+                context: null,
+                timestamp: Date.now() / 1000
+            });
+            return original(...args);
+        };
+    }
+    window.addEventListener(
+        "error",
+        (event) => {
+            const text = event.error
+                ? toText(event.error)
+                : (event.message || "Unhandled error");
+            const stackLocation = parseStackLocation(event.error && event.error.stack);
+            pushEntry({
+                kind: "exception",
+                level: "error",
+                text,
+                args: [text],
+                event_type: "exception-thrown",
+                source: "runtime.exception",
+                url: stackLocation.url || event.filename || location.href,
+                line_number: stackLocation.line_number ?? (typeof event.lineno === "number" ? event.lineno : null),
+                column_number: stackLocation.column_number ?? (typeof event.colno === "number" ? event.colno : null),
+                context: null,
+                timestamp: Date.now() / 1000
+            });
+        },
+        true
+    );
+    window.addEventListener(
+        "unhandledrejection",
+        (event) => {
+            const text = toText(event.reason);
+            const stackLocation = parseStackLocation(event.reason && event.reason.stack);
+            pushEntry({
+                kind: "exception",
+                level: "error",
+                text,
+                args: [text],
+                event_type: "unhandledrejection",
+                source: "runtime.exception",
+                url: stackLocation.url,
+                line_number: stackLocation.line_number,
+                column_number: stackLocation.column_number,
+                context: null,
+                timestamp: Date.now() / 1000
+            });
+        },
+        true
+    );
+    return true;
+}"#;
+
+const CONSOLE_BUFFER_READ_EVAL_JS: &str =
+    r#"() => Array.isArray(window.__openwalkConsoleEntries) ? window.__openwalkConsoleEntries : []"#;
+
+const CONSOLE_BUFFER_CLEAR_EVAL_JS: &str = r#"() => {
+    window.__openwalkConsoleEntries = [];
+    return true;
+}"#;
+
 #[cfg(test)]
 mod tests {
     use chromiumoxide::cdp::{
@@ -487,5 +1045,81 @@ mod tests {
 
         assert_eq!(entry.level, "warning");
         assert_eq!(entry.text, "warn details");
+    }
+
+    #[test]
+    fn filter_console_entries_applies_min_level_threshold() {
+        let entries = vec![
+            ConsoleEntry {
+                sequence: 0,
+                page_id: "page-a".to_string(),
+                kind: "console".to_string(),
+                level: "log".to_string(),
+                text: "ready".to_string(),
+                args: vec!["ready".to_string()],
+                event_type: Some("log".to_string()),
+                source: Some("runtime.console".to_string()),
+                url: None,
+                line_number: None,
+                column_number: None,
+                context: None,
+                timestamp: 1.0,
+            },
+            ConsoleEntry {
+                sequence: 1,
+                page_id: "page-a".to_string(),
+                kind: "exception".to_string(),
+                level: "error".to_string(),
+                text: "boom".to_string(),
+                args: vec!["boom".to_string()],
+                event_type: Some("exception-thrown".to_string()),
+                source: Some("runtime.exception".to_string()),
+                url: None,
+                line_number: None,
+                column_number: None,
+                context: None,
+                timestamp: 2.0,
+            },
+        ];
+
+        let filtered =
+            filter_console_entries(entries, Some("warn")).expect("console filtering should work");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].level, "error");
+    }
+
+    #[test]
+    fn filter_console_entries_rejects_unknown_min_level() {
+        let error = filter_console_entries(Vec::new(), Some("fatal"))
+            .expect_err("unknown console min-level should fail");
+
+        assert!(error.to_string().contains("unsupported console min-level"));
+    }
+
+    #[test]
+    fn format_console_entry_matches_log_style() {
+        let entry = ConsoleEntry {
+            sequence: 1,
+            page_id: "page-a".to_string(),
+            kind: "console".to_string(),
+            level: "warning".to_string(),
+            text: "warn details".to_string(),
+            args: vec!["warn".to_string(), "details".to_string()],
+            event_type: Some("warn".to_string()),
+            source: Some("runtime.console".to_string()),
+            url: Some("https://example.com/app.js".to_string()),
+            line_number: Some(42),
+            column_number: Some(7),
+            context: None,
+            timestamp: 2.5,
+        };
+
+        let line = format_console_entry(&entry, Some(1.0));
+
+        assert_eq!(
+            line,
+            "[    1500ms] [WARNING] warn details @ https://example.com/app.js:42:7"
+        );
     }
 }

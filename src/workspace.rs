@@ -7,6 +7,8 @@ use std::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::tool_ref::{relative_tool_ref_from_tool_dir, tool_ref_shim_name};
+
 const WORKSPACE_DIR: &str = ".openwalk";
 const OPENWALK_HOME_ENV: &str = "OPENWALK_HOME";
 const MANIFEST_FILE: &str = "openwalk.json";
@@ -168,30 +170,7 @@ impl Workspace {
         }
 
         let mut tools = Vec::new();
-        for entry in fs::read_dir(&tools_dir)
-            .with_context(|| format!("failed to read {}", tools_dir.display()))?
-        {
-            let entry = entry.with_context(|| {
-                format!(
-                    "failed to inspect directory entry under {}",
-                    tools_dir.display()
-                )
-            })?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let entry_path = path.join(TOOL_ENTRY_FILE);
-            if !entry_path.is_file() {
-                continue;
-            }
-
-            tools.push(LocalTool {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                entry_path,
-            });
-        }
+        collect_local_tools(&tools_dir, &tools_dir, &mut tools)?;
 
         tools.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(tools)
@@ -548,7 +527,7 @@ impl GlobalHome {
     }
 
     pub fn shim_path(&self, package: &str) -> PathBuf {
-        let name = package.replace(std::path::MAIN_SEPARATOR, "-");
+        let name = tool_ref_shim_name(package);
 
         #[cfg(windows)]
         {
@@ -575,6 +554,44 @@ impl GlobalHome {
             .with_context(|| format!("failed to write {}", path.as_ref().display()))?;
         Ok(())
     }
+}
+
+fn collect_local_tools(
+    tools_dir: &Path,
+    current_dir: &Path,
+    tools: &mut Vec<LocalTool>,
+) -> Result<()> {
+    for entry in fs::read_dir(current_dir)
+        .with_context(|| format!("failed to read {}", current_dir.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to inspect directory entry under {}",
+                current_dir.display()
+            )
+        })?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let entry_path = path.join(TOOL_ENTRY_FILE);
+        if entry_path.is_file() {
+            let name =
+                relative_tool_ref_from_tool_dir(tools_dir, &entry_path).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "failed to derive tool ref from entry {} under {}",
+                        entry_path.display(),
+                        tools_dir.display()
+                    )
+                })?;
+            tools.push(LocalTool { name, entry_path });
+        }
+
+        collect_local_tools(tools_dir, &path, tools)?;
+    }
+
+    Ok(())
 }
 
 fn manifest_to_tool_store(manifest: WorkspaceManifest) -> ToolStore {
@@ -891,6 +908,22 @@ mod tests {
     }
 
     #[test]
+    fn local_tools_discovers_namespaced_runtime_scripts() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace.init().expect("workspace should initialize");
+
+        let tool_dir = workspace.tool_dir("v2ex/hot");
+        fs::create_dir_all(&tool_dir).expect("tool dir should be created");
+        fs::write(tool_dir.join("main.scm"), "(define (main args) \"ok\")")
+            .expect("script should be written");
+
+        let tools = workspace.local_tools().expect("local tools should load");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "v2ex/hot");
+    }
+
+    #[test]
     fn global_home_init_creates_store_and_bin_dir() {
         let sandbox = TestDir::new();
         let global_home = GlobalHome::from_root(sandbox.path.join("global-home"));
@@ -947,6 +980,24 @@ mod tests {
             .load_tools()
             .expect("global tool store should load");
         assert_eq!(loaded, store);
+    }
+
+    #[test]
+    fn global_home_shim_path_replaces_namespaced_ref_separators() {
+        let sandbox = TestDir::new();
+        let global_home = GlobalHome::from_root(sandbox.path.join("global-home"));
+
+        let shim_path = global_home.shim_path("v2ex/hot");
+        let shim_name = shim_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("shim name should be utf8");
+
+        #[cfg(windows)]
+        assert_eq!(shim_name, "v2ex-hot.cmd");
+
+        #[cfg(not(windows))]
+        assert_eq!(shim_name, "v2ex-hot");
     }
 
     #[test]

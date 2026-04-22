@@ -17,6 +17,7 @@ use crate::{
     scheme_runtime,
     tool_hub::install_tool_from_hub,
     tool_metadata::{load_tool_metadata, ToolMetadata},
+    tool_ref::{is_explicit_script_target, script_target_path, validate_tool_ref},
     workspace::{GlobalHome, InitOptions, InstalledPackage, Workspace},
 };
 
@@ -27,7 +28,7 @@ use std::os::unix::fs::PermissionsExt;
 const BUILTIN_TOOLS: &[&str] = scheme_runtime::SCHEME_BUILTINS;
 
 #[derive(Debug, Clone, Serialize)]
-// Small response object used by `tool list --json`.
+// Small response object used by `tool list`.
 struct ToolListEntry {
     name: String,
     kind: String,
@@ -207,7 +208,7 @@ async fn exec_tool(
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
     }
 
-    if let Some(script_path) = resolve_workspace_tool_target(workspace, &tool) {
+    if let Some(script_path) = resolve_workspace_tool_target(workspace, &tool)? {
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
     }
 
@@ -215,7 +216,7 @@ async fn exec_tool(
         return run_builtin_tool(global_home, "exec", &tool, &cli_args).await;
     }
 
-    if let Some(script_path) = resolve_global_tool_target(global_home, &tool) {
+    if let Some(script_path) = resolve_global_tool_target(global_home, &tool)? {
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
     }
 
@@ -233,8 +234,8 @@ fn handle_tool_command(
         ToolCommand::Remove { package } => uninstall_package(workspace, package),
         ToolCommand::Install { package } => install_global_package(global_home, package),
         ToolCommand::Uninstall { package } => uninstall_global_package(global_home, package),
-        ToolCommand::List { json } => list_tools(workspace, global_home, json),
-        ToolCommand::Info { tool, json } => show_tool_info(workspace, global_home, tool, json),
+        ToolCommand::List { format } => list_tools(workspace, global_home, format),
+        ToolCommand::Info { tool, format } => show_tool_info(workspace, global_home, tool, format),
     }
 }
 
@@ -330,6 +331,7 @@ fn ensure_workspace_manifest_available(workspace: &Workspace) -> Result<()> {
 }
 
 fn remove_workspace_package(workspace: &Workspace, package: &str) -> Result<()> {
+    validate_tool_ref(package)?;
     ensure_workspace_manifest_available(workspace)?;
     let mut store = workspace.load_tools()?;
     let original_len = store.packages.len();
@@ -352,6 +354,10 @@ fn remove_workspace_package(workspace: &Workspace, package: &str) -> Result<()> 
 fn install_global_package(global_home: &GlobalHome, package: String) -> Result<()> {
     let install = ensure_global_package_installed(global_home, &package)?;
     let shim_path = write_global_shim(global_home, &package)?;
+    let shim_name = shim_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(package.as_str());
 
     println!("package: {package}");
     println!("scope: global");
@@ -366,7 +372,7 @@ fn install_global_package(global_home: &GlobalHome, package: String) -> Result<(
     println!("shim: {}", shim_path.display());
     println!("bin_dir: {}", global_home.bin_dir().display());
     println!(
-        "hint: add {} to PATH to run `{package}` directly",
+        "hint: add {} to PATH to run `{shim_name}` directly",
         global_home.bin_dir().display()
     );
 
@@ -374,6 +380,7 @@ fn install_global_package(global_home: &GlobalHome, package: String) -> Result<(
 }
 
 fn uninstall_global_package(global_home: &GlobalHome, package: String) -> Result<()> {
+    validate_tool_ref(&package)?;
     let mut store = global_home.load_tools()?;
     let original_len = store.packages.len();
     store.packages.retain(|item| item.name != package);
@@ -404,6 +411,7 @@ fn ensure_workspace_package_installed(
     workspace: &Workspace,
     package: &str,
 ) -> Result<PackageInstallResult> {
+    validate_tool_ref(package)?;
     if !workspace.is_initialized() {
         workspace.init_with_options(InitOptions::default())?;
     }
@@ -436,6 +444,7 @@ fn ensure_global_package_installed(
     global_home: &GlobalHome,
     package: &str,
 ) -> Result<PackageInstallResult> {
+    validate_tool_ref(package)?;
     global_home.init()?;
 
     let mut store = global_home.load_tools()?;
@@ -510,162 +519,81 @@ fn remove_path_if_exists(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn list_tools(workspace: &Workspace, global_home: &GlobalHome, json: bool) -> Result<()> {
+fn list_tools(workspace: &Workspace, global_home: &GlobalHome, format: String) -> Result<()> {
+    let output_format = parse_output_format(&format)?;
     let workspace_store = workspace.load_tools_or_default()?;
     let local_tools = workspace_tool_entries(workspace)?;
     let global_store = global_home.load_tools()?;
+    let mut entries = builtin_entries();
+    entries.extend(local_tools.iter().cloned());
+    entries.extend(
+        workspace_store
+            .packages
+            .iter()
+            .map(|package| ToolListEntry {
+                name: package.name.clone(),
+                kind: "declared-tool".to_string(),
+                description: None,
+                script: None,
+                version: package.version.clone(),
+                path: package.path.clone(),
+            }),
+    );
+    entries.extend(global_store.packages.iter().map(|package| ToolListEntry {
+        name: package.name.clone(),
+        kind: "global-package".to_string(),
+        description: None,
+        script: None,
+        version: package.version.clone(),
+        path: package.path.clone(),
+    }));
 
-    if json {
-        let mut entries = builtin_entries();
-        entries.extend(local_tools.iter().cloned());
-        entries.extend(
-            workspace_store
-                .packages
-                .iter()
-                .map(|package| ToolListEntry {
-                    name: package.name.clone(),
-                    kind: "declared-tool".to_string(),
-                    description: None,
-                    script: None,
-                    version: package.version.clone(),
-                    path: package.path.clone(),
-                }),
-        );
-        entries.extend(global_store.packages.iter().map(|package| ToolListEntry {
-            name: package.name.clone(),
-            kind: "global-package".to_string(),
-            description: None,
-            script: None,
-            version: package.version.clone(),
-            path: package.path.clone(),
-        }));
-
-        println!("{}", serde_json::to_string_pretty(&entries)?);
-        return Ok(());
-    }
-
-    println!("scheme_host_functions:");
-    for tool in BUILTIN_TOOLS {
-        println!("  - {tool}");
-    }
-
-    println!("workspace_tools:");
-    if local_tools.is_empty() {
-        println!("  - (none)");
-    } else {
-        for tool in local_tools {
-            let description = tool
-                .description
-                .as_deref()
-                .map(|value| format!(" | {value}"))
-                .unwrap_or_default();
-            let script = tool.script.as_deref().unwrap_or_default();
-            println!("  - {}{} ({script})", tool.name, description);
-        }
-    }
-
-    println!("declared_tools:");
-    if workspace_store.packages.is_empty() {
-        println!("  - (none)");
-    } else {
-        for package in workspace_store.packages {
-            let version = package
-                .version
-                .as_ref()
-                .map(|value| format!(" version={value}"))
-                .unwrap_or_default();
-            let path = package
-                .path
-                .as_ref()
-                .map(|value| format!(" path={value}"))
-                .unwrap_or_default();
-            println!("  - {}{}{}", package.name, version, path);
-        }
-    }
-
-    println!("global_packages:");
-    if global_store.packages.is_empty() {
-        println!("  - (none)");
-    } else {
-        for package in global_store.packages {
-            println!("  - {}", package.name);
-        }
-    }
-
-    println!("global_bin_dir: {}", global_home.bin_dir().display());
-
-    Ok(())
+    print_tool_output(
+        output_format,
+        "tool-list",
+        None,
+        serde_json::to_value(entries)?,
+    )
 }
 
 fn show_tool_info(
     workspace: &Workspace,
     global_home: &GlobalHome,
     target: String,
-    json: bool,
+    format: String,
 ) -> Result<()> {
+    let output_format = parse_output_format(&format)?;
     let info = load_tool_info(workspace, global_home, &target)?;
+    let tool_name = info.name.clone();
+    print_tool_output(
+        output_format,
+        "tool-info",
+        Some(tool_name.as_str()),
+        serde_json::to_value(info)?,
+    )
+}
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&info)?);
-        return Ok(());
-    }
-
-    println!("name: {}", info.name);
-    println!("source: {}", info.source);
-    println!("script: {}", info.script.as_deref().unwrap_or("(builtin)"));
-    println!("description: {}", info.metadata.description);
-    println!("read_only: {}", info.metadata.read_only);
-    println!("requires_login: {}", info.metadata.requires_login);
-
-    println!("domains:");
-    if info.metadata.domains.is_empty() {
-        println!("  - (none)");
-    } else {
-        for domain in &info.metadata.domains {
-            println!("  - {domain}");
+fn print_tool_output(
+    format: OutputFormat,
+    mode: &str,
+    tool: Option<&str>,
+    payload: serde_json::Value,
+) -> Result<()> {
+    let output_payload = if format == OutputFormat::Md {
+        let mut wrapper = json!({
+            "mode": mode,
+            "status": "ok",
+            "result": payload,
+        });
+        if let Some(tool) = tool {
+            wrapper["tool"] = json!(tool);
         }
-    }
-
-    println!("tags:");
-    if info.metadata.tags.is_empty() {
-        println!("  - (none)");
+        wrapper
     } else {
-        for tag in &info.metadata.tags {
-            println!("  - {tag}");
-        }
-    }
+        payload
+    };
 
-    println!("args:");
-    if info.metadata.args.is_empty() {
-        println!("  - (none)");
-    } else {
-        for arg in &info.metadata.args {
-            let default = arg
-                .default
-                .as_ref()
-                .map(|value| format!(" | default={value}"))
-                .unwrap_or_default();
-            println!(
-                "  - {} | type={} | required={}{} | description={}",
-                arg.name, arg.arg_type, arg.required, default, arg.description
-            );
-        }
-    }
-
-    println!("returns:");
-    println!("  type: {}", info.metadata.returns.return_type);
-    println!("  description: {}", info.metadata.returns.description);
-
-    println!("examples:");
-    if info.metadata.examples.is_empty() {
-        println!("  - (none)");
-    } else {
-        for example in &info.metadata.examples {
-            println!("  - {example}");
-        }
-    }
-
-    Ok(())
+    print_execution_result(format, &output_payload)
 }
 
 async fn run_scheme_script(
@@ -960,21 +888,23 @@ fn package_exists(store: &crate::workspace::ToolStore, package: &str) -> bool {
     store.packages.iter().any(|item| item.name == package)
 }
 
-fn resolve_workspace_tool_target(workspace: &Workspace, target: &str) -> Option<PathBuf> {
+fn resolve_workspace_tool_target(workspace: &Workspace, target: &str) -> Result<Option<PathBuf>> {
+    validate_tool_ref(target)?;
     let entry = workspace.tool_entry_path(target);
     if entry.exists() {
-        Some(entry)
+        Ok(Some(entry))
     } else {
-        None
+        Ok(None)
     }
 }
 
-fn resolve_global_tool_target(global_home: &GlobalHome, target: &str) -> Option<PathBuf> {
+fn resolve_global_tool_target(global_home: &GlobalHome, target: &str) -> Result<Option<PathBuf>> {
+    validate_tool_ref(target)?;
     let entry = global_home.tool_entry_path(target);
     if entry.exists() {
-        Some(entry)
+        Ok(Some(entry))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -987,7 +917,7 @@ fn load_tool_info(
         return build_tool_info("script-path", script_path);
     }
 
-    if let Some(script_path) = resolve_workspace_tool_target(workspace, target) {
+    if let Some(script_path) = resolve_workspace_tool_target(workspace, target)? {
         return build_tool_info("workspace-tool", script_path);
     }
 
@@ -995,7 +925,7 @@ fn load_tool_info(
         return build_builtin_tool_info(target);
     }
 
-    if let Some(script_path) = resolve_global_tool_target(global_home, target) {
+    if let Some(script_path) = resolve_global_tool_target(global_home, target)? {
         return build_tool_info("global-tool", script_path);
     }
 
@@ -1013,7 +943,9 @@ fn load_tool_info(
         );
     }
 
-    bail!("tool `{target}` was not found. Pass a local `.scm` path or workspace tool name");
+    bail!(
+        "tool `{target}` was not found. Pass a local script path like `./demo.scm` or an installed tool ref"
+    );
 }
 
 fn build_tool_info(source: &str, script_path: PathBuf) -> Result<ToolInfoEntry> {
@@ -1079,7 +1011,11 @@ fn shell_single_quote(text: &str) -> String {
 }
 
 fn resolve_script_target(target: &str) -> Result<Option<PathBuf>> {
-    let candidate = PathBuf::from(target);
+    if !is_explicit_script_target(target) {
+        return Ok(None);
+    }
+
+    let candidate = PathBuf::from(script_target_path(target));
 
     if candidate.exists() {
         if candidate.is_file() {
@@ -1089,11 +1025,7 @@ fn resolve_script_target(target: &str) -> Result<Option<PathBuf>> {
         bail!("script path `{target}` exists but is not a file");
     }
 
-    if target.ends_with(".scm") || target.chars().any(std::path::is_separator) {
-        bail!("scheme script `{target}` was not found");
-    }
-
-    Ok(None)
+    bail!("scheme script `{target}` was not found");
 }
 
 fn resolve_run_target(workspace: &Workspace, target: &str) -> Result<PathBuf> {
@@ -1101,11 +1033,7 @@ fn resolve_run_target(workspace: &Workspace, target: &str) -> Result<PathBuf> {
         return Ok(path);
     }
 
-    if target.contains('.') && !target.contains(std::path::MAIN_SEPARATOR) {
-        bail!(
-            "`openwalk run` expects a local `.scm` path or a workspace tool name, got `{target}`"
-        );
-    }
+    validate_tool_ref(target)?;
 
     let entry = workspace.tool_entry_path(target);
     if entry.exists() {
@@ -1121,8 +1049,9 @@ fn resolve_run_target(workspace: &Workspace, target: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::{
-        env, fs,
+        env,
         ffi::OsString,
+        fs,
         process::{self, Command},
         sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
@@ -1246,18 +1175,20 @@ mod tests {
 
     fn install_test_hub_tool(name: &str, body: &str) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
         let repo = LocalHubRepo::with_tool(name, body);
-        let url_guard =
-            EnvVarGuard::set(OPENWALK_HUB_GIT_URL_ENV, repo.path().to_str().expect("utf8 path"));
+        let url_guard = EnvVarGuard::set(
+            OPENWALK_HUB_GIT_URL_ENV,
+            repo.path().to_str().expect("utf8 path"),
+        );
         let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
         (repo, url_guard, ref_guard)
     }
 
-    fn install_test_hub_tools(
-        tools: &[(&str, &str)],
-    ) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
+    fn install_test_hub_tools(tools: &[(&str, &str)]) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
         let repo = LocalHubRepo::with_tools(tools);
-        let url_guard =
-            EnvVarGuard::set(OPENWALK_HUB_GIT_URL_ENV, repo.path().to_str().expect("utf8 path"));
+        let url_guard = EnvVarGuard::set(
+            OPENWALK_HUB_GIT_URL_ENV,
+            repo.path().to_str().expect("utf8 path"),
+        );
         let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
         (repo, url_guard, ref_guard)
     }
@@ -1347,6 +1278,12 @@ mod tests {
     }
 
     #[test]
+    fn resolve_script_target_treats_namespaced_refs_as_tools() {
+        let resolved = resolve_script_target("v2ex/hot").expect("resolution should succeed");
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
     fn resolve_run_target_maps_tool_name_to_workspace_entry() {
         let sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(sandbox.path.clone());
@@ -1363,8 +1300,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_run_target_supports_namespaced_workspace_tools() {
+        let sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(sandbox.path.clone());
+        workspace.init().expect("workspace should initialize");
+
+        let tool_dir = workspace.tool_dir("v2ex/hot");
+        fs::create_dir_all(&tool_dir).expect("tool dir should be created");
+        let entry = tool_dir.join("main.scm");
+        fs::write(&entry, "(+ 1 2)").expect("script should be written");
+
+        let resolved =
+            resolve_run_target(&workspace, "v2ex/hot").expect("workspace tool should resolve");
+        assert_eq!(resolved, entry);
+    }
+
+    #[test]
     fn install_and_uninstall_package_updates_store() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let (_sandbox, workspace) = initialized_workspace();
         let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
             "browser-tools",
@@ -1413,7 +1368,9 @@ mod tests {
 
     #[test]
     fn install_workspace_tools_installs_declared_manifest_packages() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(sandbox.path.clone());
         workspace
@@ -1487,7 +1444,9 @@ mod tests {
 
     #[test]
     fn handle_tool_add_and_remove_updates_store() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let (_workspace_sandbox, workspace) = initialized_workspace();
         let (_global_sandbox, global_home) = initialized_global_home();
         let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
@@ -1552,7 +1511,9 @@ mod tests {
 
     #[test]
     fn handle_tool_install_and_uninstall_updates_global_store_and_shim() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let (_workspace_sandbox, workspace) = initialized_workspace();
         let (_global_sandbox, global_home) = initialized_global_home();
         let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
@@ -1656,7 +1617,9 @@ mod tests {
 
     #[test]
     fn load_tool_info_reads_global_script_metadata() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
         let (_global_sandbox, global_home) = initialized_global_home();
@@ -1807,7 +1770,9 @@ mod tests {
 
     #[tokio::test]
     async fn exec_tool_auto_installs_unknown_tools_from_hub() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
         let (_global_sandbox, global_home) = initialized_global_home();
@@ -1852,6 +1817,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
+        let workspace_sandbox = TestDir::new();
+        let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+        let (_global_sandbox, global_home) = initialized_global_home();
+        let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_tool(
+            "v2ex/hot",
+            r#"#| @meta
+{
+  "name": "v2ex/hot",
+  "description": "Namespaced fixture tool",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "ok"
+  },
+  "examples": ["openwalk exec v2ex/hot"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["fixture"]
+}
+|#
+(define (main args) "remote-ok")
+"#,
+        );
+
+        exec_tool(
+            &workspace,
+            &global_home,
+            ToolExecArgs {
+                tool: "v2ex/hot".to_string(),
+                args: Vec::new(),
+            },
+        )
+        .await
+        .expect("exec should install and run the namespaced hub tool");
+
+        let installed = workspace
+            .load_tools()
+            .expect("tools should load after remote exec install");
+        assert!(package_exists(&installed, "v2ex/hot"));
+        assert!(workspace.tool_entry_path("v2ex/hot").exists());
+    }
+
+    #[tokio::test]
     async fn exec_tool_executes_builtin_host_function() {
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
@@ -1871,7 +1884,9 @@ mod tests {
 
     #[tokio::test]
     async fn exec_tool_allows_global_packages_without_workspace_init() {
-        let _env_guard = HUB_ENV_LOCK.lock().expect("hub env lock should be acquired");
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("hub env lock should be acquired");
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
         let (_global_sandbox, global_home) = initialized_global_home();
