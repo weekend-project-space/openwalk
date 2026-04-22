@@ -89,6 +89,15 @@ pub enum BrowserCommand {
     Hover {
         selector: String,
     },
+    Upload {
+        selector: String,
+        files: Vec<String>,
+    },
+    Drag {
+        source: String,
+        target: String,
+    },
+    Snapshot,
     Screenshot {
         path: String,
     },
@@ -176,7 +185,9 @@ pub enum BrowserCommand {
     NetworkResponseBody {
         url_contains: String,
     },
-    ConsoleList,
+    Console {
+        min_level: Option<String>,
+    },
     ConsoleClear,
     InspectInfo {
         selector: String,

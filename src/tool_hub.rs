@@ -7,10 +7,11 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
+use crate::tool_ref::{tool_ref_relative_path, validate_tool_ref};
+
 pub const OPENWALK_HUB_GIT_URL_ENV: &str = "OPENWALK_HUB_GIT_URL";
 pub const OPENWALK_HUB_GIT_REF_ENV: &str = "OPENWALK_HUB_GIT_REF";
-const DEFAULT_OPENWALK_HUB_GIT_URL: &str =
-    "https://github.com/weekend-project-space/openwalkhub";
+const DEFAULT_OPENWALK_HUB_GIT_URL: &str = "https://github.com/weekend-project-space/openwalkhub";
 const DEFAULT_OPENWALK_HUB_GIT_REF: &str = "main";
 const TOOL_ENTRY_FILE: &str = "main.scm";
 
@@ -38,7 +39,7 @@ impl ToolHubConfig {
 }
 
 pub fn install_tool_from_hub(package: &str, destination_dir: &Path) -> Result<PathBuf> {
-    validate_package_name(package)?;
+    validate_tool_ref(package)?;
 
     if destination_dir.exists() {
         bail!(
@@ -53,7 +54,9 @@ pub fn install_tool_from_hub(package: &str, destination_dir: &Path) -> Result<Pa
 
     clone_hub_repo(&config, &checkout_dir)?;
 
-    let source_dir = checkout_dir.join("tools").join(package);
+    let source_dir = checkout_dir
+        .join("tools")
+        .join(tool_ref_relative_path(package)?);
     let source_entry = source_dir.join(TOOL_ENTRY_FILE);
     if !source_dir.is_dir() {
         bail!(
@@ -82,19 +85,6 @@ pub fn install_tool_from_hub(package: &str, destination_dir: &Path) -> Result<Pa
     }
 
     Ok(installed_entry)
-}
-
-fn validate_package_name(package: &str) -> Result<()> {
-    let trimmed = package.trim();
-    if trimmed.is_empty() {
-        bail!("package name must not be empty");
-    }
-
-    if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
-        bail!("package name `{package}` must be a single directory name");
-    }
-
-    Ok(())
 }
 
 fn clone_hub_repo(config: &ToolHubConfig, checkout_dir: &Path) -> Result<()> {

@@ -50,6 +50,9 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "js-wait",
     "element-exists",
     "element-hover",
+    "element-upload",
+    "element-drag",
+    "page-snapshot",
     "page-screenshot",
     "element-screenshot",
     "page-pdf",
@@ -82,7 +85,7 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "network-list",
     "network-wait-response",
     "network-response-body",
-    "console-list",
+    "console",
     "console-clear",
     "inspect-info",
     "inspect-highlight",
@@ -289,6 +292,47 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
                 "input".to_string(),
             ],
         },
+        "element-upload" => ToolMetadata {
+            name: name.to_string(),
+            description: "向文件输入框上传一个或多个本地文件。".to_string(),
+            args: vec![
+                tool_arg("selector", "string", true, "文件输入框选择器"),
+                tool_arg("file", "string", true, "要上传的本地文件路径，可重复传多个"),
+            ],
+            returns: ToolReturn {
+                return_type: "array".to_string(),
+                description: "成功设置到输入框中的绝对文件路径数组。".to_string(),
+            },
+            examples: vec![
+                "openwalk exec element-upload \"input[type=file]\" ./avatar.png".to_string(),
+                "openwalk exec element-upload \"input[type=file]\" ./a.txt ./b.txt".to_string(),
+            ],
+            domains: Vec::new(),
+            read_only: false,
+            requires_login: false,
+            tags: vec![
+                "builtin".to_string(),
+                "dom".to_string(),
+                "upload".to_string(),
+            ],
+        },
+        "element-drag" => ToolMetadata {
+            name: name.to_string(),
+            description: "把一个元素拖拽到另一个元素上。".to_string(),
+            args: vec![
+                tool_arg("source", "string", true, "拖拽起点元素选择器"),
+                tool_arg("target", "string", true, "拖拽目标元素选择器"),
+            ],
+            returns: ToolReturn {
+                return_type: "boolean".to_string(),
+                description: "拖拽事件链派发成功时返回 true。".to_string(),
+            },
+            examples: vec!["openwalk exec element-drag \"#card-1\" \"#drop-zone\"".to_string()],
+            domains: Vec::new(),
+            read_only: false,
+            requires_login: false,
+            tags: vec!["builtin".to_string(), "dom".to_string(), "drag".to_string()],
+        },
         "js-eval" => ToolMetadata {
             name: name.to_string(),
             description: "在当前页面执行一段 JavaScript。".to_string(),
@@ -310,6 +354,24 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
                 "builtin".to_string(),
                 "runtime".to_string(),
                 "javascript".to_string(),
+            ],
+        },
+        "page-snapshot" => ToolMetadata {
+            name: name.to_string(),
+            description: "抓取当前页面的结构化快照，包含标题、文本预览和交互元素摘要。".to_string(),
+            args: Vec::new(),
+            returns: ToolReturn {
+                return_type: "object".to_string(),
+                description: "页面结构化快照对象。".to_string(),
+            },
+            examples: vec!["openwalk exec page-snapshot".to_string()],
+            domains: Vec::new(),
+            read_only: true,
+            requires_login: false,
+            tags: vec![
+                "builtin".to_string(),
+                "page".to_string(),
+                "snapshot".to_string(),
             ],
         },
         "tab-list" => ToolMetadata {
@@ -440,6 +502,33 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
                 "read".to_string(),
             ],
         },
+        "console" => ToolMetadata {
+            name: name.to_string(),
+            description: "读取当前页面已记录的控制台日志；可选按最低级别过滤。"
+                .to_string(),
+            args: vec![tool_arg(
+                "min-level",
+                "string",
+                false,
+                "最小日志级别，可选：log、debug、info、warn、warning、error",
+            )],
+            returns: ToolReturn {
+                return_type: "array".to_string(),
+                description: "按时间、级别、正文、位置格式化后的日志文本行数组。".to_string(),
+            },
+            examples: vec![
+                "openwalk exec console".to_string(),
+                "openwalk exec console warn".to_string(),
+            ],
+            domains: Vec::new(),
+            read_only: true,
+            requires_login: false,
+            tags: vec![
+                "builtin".to_string(),
+                "console".to_string(),
+                "read".to_string(),
+            ],
+        },
         "cdp-call" => ToolMetadata {
             name: name.to_string(),
             description: "直接调用一条 CDP 命令。".to_string(),
@@ -562,6 +651,9 @@ fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
         "js-wait" => browser_wait_function,
         "element-exists" => browser_exists,
         "element-hover" => browser_hover,
+        "element-upload" => browser_upload,
+        "element-drag" => browser_drag,
+        "page-snapshot" => browser_page_snapshot,
         "page-screenshot" => browser_screenshot,
         "element-screenshot" => browser_element_screenshot,
         "page-pdf" => browser_pdf,
@@ -594,7 +686,7 @@ fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
         "network-list" => browser_network_requests,
         "network-wait-response" => browser_network_wait_response,
         "network-response-body" => browser_network_response_body,
-        "console-list" => browser_console_list,
+        "console" => browser_console,
         "console-clear" => browser_console_clear,
         "inspect-info" => browser_inspect_info,
         "inspect-highlight" => browser_inspect_highlight,
@@ -735,7 +827,7 @@ fn builtin_domain_tag(name: &str) -> &'static str {
         "tab"
     } else if name.starts_with("network-") {
         "network"
-    } else if name.starts_with("console-") {
+    } else if name == "console" || name.starts_with("console-") {
         "console"
     } else if name.starts_with("inspect-") {
         "inspect"
@@ -788,6 +880,18 @@ define_browser_builtin!(browser_uncheck, "element-uncheck", [selector => expect_
 define_browser_builtin!(browser_wait_function, "js-wait", [expression => expect_string], BrowserCommand::WaitFunction { expression });
 define_browser_builtin!(browser_exists, "element-exists", [selector => expect_string], BrowserCommand::Exists { selector });
 define_browser_builtin!(browser_hover, "element-hover", [selector => expect_string], BrowserCommand::Hover { selector });
+define_browser_builtin!(
+    browser_drag,
+    "element-drag",
+    [source => expect_string, target => expect_string],
+    BrowserCommand::Drag { source, target }
+);
+define_browser_builtin!(
+    browser_page_snapshot,
+    "page-snapshot",
+    [],
+    BrowserCommand::Snapshot
+);
 define_browser_builtin!(browser_screenshot, "page-screenshot", [path => expect_string], BrowserCommand::Screenshot { path });
 define_browser_builtin!(browser_element_screenshot, "element-screenshot", [selector => expect_string, path => expect_string], BrowserCommand::ElementScreenshot { selector, path });
 define_browser_builtin!(browser_pdf, "page-pdf", [path => expect_string], BrowserCommand::Pdf { path });
@@ -868,12 +972,6 @@ define_browser_builtin!(
     BrowserCommand::NetworkResponseBody { url_contains }
 );
 define_browser_builtin!(
-    browser_console_list,
-    "console-list",
-    [],
-    BrowserCommand::ConsoleList
-);
-define_browser_builtin!(
     browser_console_clear,
     "console-clear",
     [],
@@ -936,6 +1034,28 @@ fn browser_viewport(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
     let width = expect_i64("device-viewport", &args[0], "width")?;
     let height = expect_i64("device-viewport", &args[1], "height")?;
     call_browser(BrowserCommand::Viewport { width, height })
+}
+
+fn browser_upload(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity_range("element-upload", args, 2, usize::MAX)?;
+    let selector = expect_string("element-upload", &args[0], "selector")?;
+    let files = args
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(index, value)| expect_string("element-upload", value, &format!("file-{}", index)))
+        .collect::<Result<Vec<_>, _>>()?;
+    call_browser(BrowserCommand::Upload { selector, files })
+}
+
+fn browser_console(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity_range("console", args, 0, 1)?;
+    let min_level = if args.is_empty() {
+        None
+    } else {
+        Some(expect_string("console", &args[0], "min-level")?)
+    };
+    call_browser(BrowserCommand::Console { min_level })
 }
 
 fn tab_new(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
@@ -1325,8 +1445,9 @@ fn maybe_alist_to_json_object(
 #[cfg(test)]
 mod tests {
     use std::{
-        env, fs, process,
+        env,
         ffi::OsString,
+        fs, process,
         sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -1575,8 +1696,10 @@ mod tests {
         let _env_guard = ENV_LOCK.lock().expect("env lock should be acquired");
         let sandbox = TestDir::new();
         let global_home_root = sandbox.path.join("global-home");
-        let _openwalk_home =
-            EnvVarGuard::set("OPENWALK_HOME", global_home_root.to_str().expect("utf8 path"));
+        let _openwalk_home = EnvVarGuard::set(
+            "OPENWALK_HOME",
+            global_home_root.to_str().expect("utf8 path"),
+        );
 
         let global_home = GlobalHome::discover().expect("global home should resolve");
         global_home.init().expect("global home should initialize");
@@ -1611,6 +1734,65 @@ mod tests {
         assert_eq!(metadata.returns.return_type, "string");
         assert_eq!(metadata.args.len(), 1);
         assert_eq!(metadata.args[0].name, "url");
+    }
+
+    #[test]
+    fn builtin_tool_metadata_exposes_element_upload() {
+        let metadata =
+            builtin_tool_metadata("element-upload").expect("element-upload metadata should exist");
+
+        assert_eq!(metadata.name, "element-upload");
+        assert_eq!(metadata.returns.return_type, "array");
+        assert_eq!(metadata.args.len(), 2);
+        assert_eq!(metadata.args[0].name, "selector");
+        assert_eq!(metadata.args[1].name, "file");
+    }
+
+    #[test]
+    fn builtin_tool_metadata_exposes_page_snapshot() {
+        let metadata =
+            builtin_tool_metadata("page-snapshot").expect("page-snapshot metadata should exist");
+
+        assert_eq!(metadata.name, "page-snapshot");
+        assert_eq!(metadata.returns.return_type, "object");
+        assert!(metadata.args.is_empty());
+        assert!(metadata.read_only);
+    }
+
+    #[test]
+    fn builtin_tool_metadata_exposes_console() {
+        let metadata = builtin_tool_metadata("console").expect("console metadata should exist");
+
+        assert_eq!(metadata.name, "console");
+        assert_eq!(metadata.returns.return_type, "array");
+        assert_eq!(metadata.args.len(), 1);
+        assert_eq!(metadata.args[0].name, "min-level");
+        assert!(metadata.read_only);
+    }
+
+    #[test]
+    fn browser_upload_requires_at_least_one_file() {
+        let engine = Engine::new(Environment::standard());
+        let error = browser_upload(&engine, &[Value::string("input[type=file]")])
+            .expect_err("element-upload should reject a missing file argument");
+
+        assert!(error
+            .to_string()
+            .contains("`element-upload` expects between 2 and"));
+    }
+
+    #[test]
+    fn browser_console_rejects_extra_arguments() {
+        let engine = Engine::new(Environment::standard());
+        let error = browser_console(
+            &engine,
+            &[Value::string("warn"), Value::string("extra")],
+        )
+        .expect_err("console should only allow an optional min-level");
+
+        assert!(error
+            .to_string()
+            .contains("`console` expects between 0 and 1 argument(s)"));
     }
 
     #[tokio::test]
@@ -1668,6 +1850,8 @@ mod tests {
         assert!(SCHEME_BUILTINS.contains(&"browser-list"));
         assert!(SCHEME_BUILTINS.contains(&"page-goto"));
         assert!(SCHEME_BUILTINS.contains(&"element-click"));
+        assert!(SCHEME_BUILTINS.contains(&"element-upload"));
+        assert!(SCHEME_BUILTINS.contains(&"element-drag"));
         assert!(SCHEME_BUILTINS.contains(&"keyboard-press"));
         assert!(SCHEME_BUILTINS.contains(&"mouse-click"));
         assert!(SCHEME_BUILTINS.contains(&"touch-tap"));
@@ -1681,8 +1865,13 @@ mod tests {
     }
 
     #[test]
+    fn scheme_builtin_list_contains_snapshot_helpers() {
+        assert!(SCHEME_BUILTINS.contains(&"page-snapshot"));
+    }
+
+    #[test]
     fn scheme_builtin_list_contains_console_helpers() {
-        assert!(SCHEME_BUILTINS.contains(&"console-list"));
+        assert!(SCHEME_BUILTINS.contains(&"console"));
         assert!(SCHEME_BUILTINS.contains(&"console-clear"));
     }
 

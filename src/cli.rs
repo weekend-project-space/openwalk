@@ -61,6 +61,12 @@ pub struct ProjectInstallArgs {}
 pub struct ToolExecArgs {
     /// Scheme script path or tool name, for example ./demo.scm
     pub tool: String,
+
+    // #[arg(short = 's', long = "session", default_value = "default")]
+    // pub session: String,
+
+    // #[arg(short = 'f', long = "format", default_value = "yaml")]
+    // pub format: String,
     /// Additional arguments passed to the tool.
     // Keep the remainder untouched so tool-specific flags are not parsed as CLI flags.
     #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
@@ -91,17 +97,17 @@ pub enum ToolCommand {
     },
     /// List built-in host functions and installed tools.
     List {
-        /// Emit machine-readable JSON.
-        #[arg(long)]
-        json: bool,
+        /// Output format: yaml (default), md, or json.
+        #[arg(short = 'f', long = "format", default_value = "yaml")]
+        format: String,
     },
     /// Show metadata for a built-in host function or local Scheme tool script.
     Info {
         /// Workspace tool name or local .scm file path.
         tool: String,
-        /// Emit machine-readable JSON.
-        #[arg(long)]
-        json: bool,
+        /// Output format: yaml (default), md, or json.
+        #[arg(short = 'f', long = "format", default_value = "yaml")]
+        format: String,
     },
 }
 
@@ -243,15 +249,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_tool_list_json_flag() {
-        let cli = Cli::try_parse_from(["openwalk", "tool", "list", "--json"])
+    fn parses_tool_list_format_flag() {
+        let cli = Cli::try_parse_from(["openwalk", "tool", "list", "--format=json"])
             .expect("tool list should parse");
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::List { json },
+                command: ToolCommand::List { format },
             } => {
-                assert!(json);
+                assert_eq!(format, "json");
             }
             other => panic!("expected tool list command, got {other:?}"),
         }
@@ -264,26 +270,26 @@ mod tests {
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::Info { tool, json },
+                command: ToolCommand::Info { tool, format },
             } => {
                 assert_eq!(tool, "bing-search");
-                assert!(!json);
+                assert_eq!(format, "yaml");
             }
             other => panic!("expected tool info command, got {other:?}"),
         }
     }
 
     #[test]
-    fn parses_tool_info_json_flag() {
-        let cli = Cli::try_parse_from(["openwalk", "tool", "info", "./demo.scm", "--json"])
+    fn parses_tool_info_format_flag() {
+        let cli = Cli::try_parse_from(["openwalk", "tool", "info", "./demo.scm", "-f=json"])
             .expect("tool info should parse");
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::Info { tool, json },
+                command: ToolCommand::Info { tool, format },
             } => {
                 assert_eq!(tool, "./demo.scm");
-                assert!(json);
+                assert_eq!(format, "json");
             }
             other => panic!("expected tool info command, got {other:?}"),
         }
