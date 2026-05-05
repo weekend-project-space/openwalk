@@ -1,8 +1,7 @@
-use std::collections::BTreeMap;
-use std::{collections::HashMap, path::PathBuf};
-
 use super::session::BrowserSessionHandle;
 use super::*;
+use indexmap::IndexMap;
+use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct BrowserClient {
@@ -247,7 +246,7 @@ pub enum BrowserValue {
     Number(i64),
     String(String),
     Array(Vec<BrowserValue>),
-    Object(BTreeMap<String, BrowserValue>),
+    Object(IndexMap<String, BrowserValue>),
 }
 
 #[derive(Debug)]

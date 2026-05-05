@@ -585,9 +585,9 @@ fn execute_script_sync(
     let scheme = Scheme::with_env(env);
 
     let _guard = install_host_context(HostContext { browser });
-    let loaded_value = scheme
-        .eval(&source)
-        .map_err(|err| scheme_error_to_anyhow("scheme execution failed while loading script", err))?;
+    let loaded_value = scheme.eval(&source).map_err(|err| {
+        scheme_error_to_anyhow("scheme execution failed while loading script", err)
+    })?;
 
     let value: Value = match scheme.eval("(main openwalk-args)") {
         Ok(value) => value,
