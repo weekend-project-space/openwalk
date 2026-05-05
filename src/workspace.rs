@@ -429,6 +429,18 @@ impl GlobalHome {
         self.tool_dir(tool_name).join(TOOL_ENTRY_FILE)
     }
 
+    pub fn local_tools(&self) -> Result<Vec<LocalTool>> {
+        let tools_dir = self.tools_dir();
+        if !tools_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut tools = Vec::new();
+        collect_local_tools(&tools_dir, &tools_dir, &mut tools)?;
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(tools)
+    }
+
     pub fn browser_profiles_dir(&self) -> PathBuf {
         self.root.join(BROWSER_PROFILES_DIR)
     }

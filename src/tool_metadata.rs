@@ -29,7 +29,7 @@ pub struct ToolArgument {
     #[serde(rename = "type")]
     pub arg_type: String,
     pub required: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
     pub description: String,
 }

@@ -16,7 +16,7 @@ use crate::{
     output::{normalize_result_value, parse_output_format, print_execution_result, OutputFormat},
     scheme_runtime,
     tool_hub::install_tool_from_hub,
-    tool_metadata::{load_tool_metadata, ToolMetadata},
+    tool_metadata::{load_tool_metadata, ToolArgument, ToolMetadata, ToolReturn},
     tool_ref::{is_explicit_script_target, script_target_path, validate_tool_ref},
     workspace::{GlobalHome, InitOptions, InstalledPackage, Workspace},
 };
@@ -28,18 +28,12 @@ use std::os::unix::fs::PermissionsExt;
 const BUILTIN_TOOLS: &[&str] = scheme_runtime::SCHEME_BUILTINS;
 
 #[derive(Debug, Clone, Serialize)]
-// Small response object used by `tool list`.
+// Compact response shape used by `tool list`.
 struct ToolListEntry {
     name: String,
-    kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    script: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<String>,
+    usage: String,
+    description: String,
+    source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,6 +43,31 @@ struct ToolInfoEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     script: Option<String>,
     metadata: ToolMetadata,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolInfoView {
+    name: String,
+    usage: String,
+    description: String,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    script: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    args: Vec<ToolArgument>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    options: Vec<ToolArgument>,
+    returns: ToolReturn,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    examples: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    domains: Vec<String>,
+    #[serde(rename = "readOnly", skip_serializing_if = "is_false")]
+    read_only: bool,
+    #[serde(rename = "requiresLogin", skip_serializing_if = "is_false")]
+    requires_login: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -523,39 +542,17 @@ fn remove_path_if_exists(path: &Path) -> Result<()> {
 
 fn list_tools(workspace: &Workspace, global_home: &GlobalHome, format: String) -> Result<()> {
     let output_format = parse_output_format(&format)?;
-    let workspace_store = workspace.load_tools_or_default()?;
-    let local_tools = workspace_tool_entries(workspace)?;
-    let global_store = global_home.load_tools()?;
     let mut entries = builtin_entries();
-    entries.extend(local_tools.iter().cloned());
-    entries.extend(
-        workspace_store
-            .packages
-            .iter()
-            .map(|package| ToolListEntry {
-                name: package.name.clone(),
-                kind: "declared-tool".to_string(),
-                description: None,
-                script: None,
-                version: package.version.clone(),
-                path: package.path.clone(),
-            }),
-    );
-    entries.extend(global_store.packages.iter().map(|package| ToolListEntry {
-        name: package.name.clone(),
-        kind: "global-package".to_string(),
-        description: None,
-        script: None,
-        version: package.version.clone(),
-        path: package.path.clone(),
-    }));
+    entries.extend(workspace_tool_entries(workspace)?);
+    entries.extend(global_tool_entries(global_home)?);
 
-    print_tool_output(
-        output_format,
-        "tool-list",
-        None,
-        serde_json::to_value(entries)?,
-    )
+    let payload = if output_format == OutputFormat::Json {
+        serde_json::to_value(entries)?
+    } else {
+        serde_json::to_value(render_tool_list_lines(&entries))?
+    };
+
+    print_tool_output(output_format, "tool-list", None, payload)
 }
 
 fn show_tool_info(
@@ -566,12 +563,13 @@ fn show_tool_info(
 ) -> Result<()> {
     let output_format = parse_output_format(&format)?;
     let info = load_tool_info(workspace, global_home, &target)?;
-    let tool_name = info.name.clone();
+    let view = build_tool_info_view(&info, &target);
+    let tool_name = view.name.clone();
     print_tool_output(
         output_format,
         "tool-info",
         Some(tool_name.as_str()),
-        serde_json::to_value(info)?,
+        serde_json::to_value(view)?,
     )
 }
 
@@ -856,12 +854,13 @@ fn builtin_entries() -> Vec<ToolListEntry> {
         .iter()
         .map(|tool| ToolListEntry {
             name: (*tool).to_string(),
-            kind: "host-function".to_string(),
+            usage: scheme_runtime::builtin_tool_metadata(tool)
+                .map(|metadata| tool_usage_from_metadata(metadata.name.as_str(), &metadata.args))
+                .unwrap_or_else(|| (*tool).to_string()),
             description: scheme_runtime::builtin_tool_metadata(tool)
-                .map(|metadata| metadata.description),
-            script: None,
-            version: None,
-            path: None,
+                .map(|metadata| compact_tool_description(tool, metadata.description.as_str()))
+                .unwrap_or_else(|| tool.to_string()),
+            source: "builtin".to_string(),
         })
         .collect()
 }
@@ -871,22 +870,322 @@ fn workspace_tool_entries(workspace: &Workspace) -> Result<Vec<ToolListEntry>> {
         .local_tools()?
         .into_iter()
         .map(|tool| {
-            let description = load_tool_metadata(&tool.entry_path)
-                .ok()
-                .map(|metadata| metadata.description);
+            let metadata = load_tool_metadata(&tool.entry_path).ok();
+            let usage = metadata
+                .as_ref()
+                .map(|metadata| tool_usage_from_metadata(tool.name.as_str(), &metadata.args))
+                .unwrap_or_else(|| tool.name.clone());
+            let description = metadata
+                .as_ref()
+                .map(|metadata| metadata.description.clone())
+                .unwrap_or_else(|| "Workspace Scheme tool".to_string());
 
             ToolListEntry {
                 name: tool.name,
-                kind: "workspace-tool".to_string(),
+                usage,
                 description,
-                script: Some(tool.entry_path.display().to_string()),
-                version: None,
-                path: None,
+                source: "workspace".to_string(),
             }
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(entries)
+}
+
+fn global_tool_entries(global_home: &GlobalHome) -> Result<Vec<ToolListEntry>> {
+    let mut entries = global_home
+        .local_tools()?
+        .into_iter()
+        .map(|tool| {
+            let metadata = load_tool_metadata(&tool.entry_path).ok();
+            let usage = metadata
+                .as_ref()
+                .map(|metadata| tool_usage_from_metadata(tool.name.as_str(), &metadata.args))
+                .unwrap_or_else(|| tool.name.clone());
+            let description = metadata
+                .as_ref()
+                .map(|metadata| metadata.description.clone())
+                .unwrap_or_else(|| "Global Scheme tool".to_string());
+
+            ToolListEntry {
+                name: tool.name,
+                usage,
+                description,
+                source: "global".to_string(),
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(entries)
+}
+
+fn render_tool_list_lines(entries: &[ToolListEntry]) -> Vec<String> {
+    let usage_width = entries
+        .iter()
+        .map(|entry| entry.usage.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    entries
+        .iter()
+        .map(|entry| {
+            if entry.description.is_empty() {
+                entry.usage.clone()
+            } else {
+                format!(
+                    "{:<width$}  {}",
+                    entry.usage,
+                    entry.description,
+                    width = usage_width
+                )
+            }
+        })
+        .collect()
+}
+
+fn build_tool_info_view(info: &ToolInfoEntry, target: &str) -> ToolInfoView {
+    let metadata = &info.metadata;
+    let usage_name = if info.source == "script-path" {
+        target
+    } else {
+        metadata.name.as_str()
+    };
+
+    ToolInfoView {
+        name: metadata.name.clone(),
+        usage: tool_usage_from_metadata(usage_name, &metadata.args),
+        description: trim_tool_description(metadata.description.as_str()),
+        source: display_tool_source(info.source.as_str()),
+        script: info.script.clone(),
+        args: metadata.args.clone(),
+        options: tool_info_options(info.source.as_str(), metadata.name.as_str()),
+        returns: metadata.returns.clone(),
+        examples: metadata.examples.clone(),
+        domains: metadata.domains.clone(),
+        read_only: metadata.read_only,
+        requires_login: metadata.requires_login,
+        tags: metadata.tags.clone(),
+    }
+}
+
+fn display_tool_source(source: &str) -> String {
+    match source {
+        "host-function" => "builtin".to_string(),
+        "workspace-tool" => "workspace".to_string(),
+        "global-tool" => "global".to_string(),
+        "script-path" => "script".to_string(),
+        _ => source.to_string(),
+    }
+}
+
+fn tool_info_options(source: &str, name: &str) -> Vec<ToolArgument> {
+    let mut options = Vec::new();
+
+    if source == "host-function" && name != "browser-list" && is_browser_tool_name(name) {
+        options.push(tool_option(
+            "-s, --session <name>",
+            "string",
+            "指定浏览器会话名称",
+        ));
+    }
+
+    if name == "browser-open" {
+        options.push(tool_option("--headed", "bool", "以有界面模式打开浏览器"));
+        options.push(tool_option("--new-tab", "bool", "在现有会话中打开新标签页"));
+        options.push(tool_option(
+            "--profile <path>",
+            "string",
+            "指定浏览器 profile 目录",
+        ));
+    }
+
+    options
+}
+
+fn tool_option(name: &str, arg_type: &str, description: &str) -> ToolArgument {
+    ToolArgument {
+        name: name.to_string(),
+        arg_type: arg_type.to_string(),
+        required: false,
+        default: None,
+        description: description.to_string(),
+    }
+}
+
+fn is_browser_tool_name(name: &str) -> bool {
+    name != "openwalk-output-format"
+        && (name.starts_with("browser-")
+            || name.starts_with("page-")
+            || name.starts_with("element-")
+            || name.starts_with("keyboard-")
+            || name.starts_with("mouse-")
+            || name.starts_with("touch-")
+            || name.starts_with("tab-")
+            || name.starts_with("network-")
+            || name.starts_with("console")
+            || name.starts_with("inspect-")
+            || name.starts_with("tracing-")
+            || name.starts_with("device-")
+            || name.starts_with("localstorage-")
+            || name.starts_with("sessionstorage-")
+            || name.starts_with("cookie-")
+            || name.starts_with("js-")
+            || name.starts_with("time-")
+            || name.starts_with("cdp-"))
+}
+
+fn tool_usage_from_metadata(name: &str, args: &[crate::tool_metadata::ToolArgument]) -> String {
+    if let Some(usage) = builtin_tool_usage_override(name) {
+        return usage.to_string();
+    }
+
+    let mut usage = String::from(name);
+    for (index, arg) in args.iter().enumerate() {
+        usage.push(' ');
+        usage.push_str(render_tool_usage_arg(name, index, arg).as_str());
+    }
+    usage
+}
+
+fn builtin_tool_usage_override(name: &str) -> Option<&'static str> {
+    match name {
+        "element-double-click" => Some("element-double-click <selector>"),
+        "element-right-click" => Some("element-right-click <selector>"),
+        "element-type" => Some("element-type <selector> <text>"),
+        "element-fill" => Some("element-fill <selector> <text>"),
+        "keyboard-press" => Some("keyboard-press <key>"),
+        "keyboard-type" => Some("keyboard-type <text>"),
+        "keyboard-down" => Some("keyboard-down <key>"),
+        "keyboard-up" => Some("keyboard-up <key>"),
+        "element-select" => Some("element-select <selector> <value>"),
+        "element-check" => Some("element-check <selector>"),
+        "element-uncheck" => Some("element-uncheck <selector>"),
+        "js-wait" => Some("js-wait <expression>"),
+        "element-exists" => Some("element-exists <selector>"),
+        "element-hover" => Some("element-hover <selector>"),
+        "page-screenshot" => Some("page-screenshot <path>"),
+        "element-screenshot" => Some("element-screenshot <selector> <path>"),
+        "page-pdf" => Some("page-pdf <path>"),
+        "page-scroll-to" => Some("page-scroll-to <x> <y>"),
+        "page-scroll-by" => Some("page-scroll-by <x> <y>"),
+        "device-viewport" => Some("device-viewport <width> <height>"),
+        "localstorage-get" => Some("localstorage-get <key>"),
+        "localstorage-set" => Some("localstorage-set <key> <value>"),
+        "localstorage-remove" => Some("localstorage-remove <key>"),
+        "sessionstorage-get" => Some("sessionstorage-get <key>"),
+        "sessionstorage-set" => Some("sessionstorage-set <key> <value>"),
+        "sessionstorage-remove" => Some("sessionstorage-remove <key>"),
+        "cookie-get" => Some("cookie-get <name>"),
+        "cookie-set" => Some("cookie-set <name> <value> [url] [domain] [path]"),
+        "cookie-delete" => Some("cookie-delete <name> [url] [domain] [path]"),
+        "network-wait-response" => Some("network-wait-response <url_contains>"),
+        "inspect-info" => Some("inspect-info <selector>"),
+        "inspect-highlight" => Some("inspect-highlight <selector>"),
+        "inspect-pick" => Some("inspect-pick [timeout-ms]"),
+        "tracing-start" => Some("tracing-start [categories]"),
+        "tracing-stop" => Some("tracing-stop <path>"),
+        "mouse-move" => Some("mouse-move <x> <y>"),
+        "mouse-click" => Some("mouse-click <x> <y>"),
+        "mouse-down" => Some("mouse-down <x> <y> <button>"),
+        "mouse-up" => Some("mouse-up <x> <y> <button>"),
+        "mouse-wheel" => Some("mouse-wheel <x> <y> <delta-x> <delta-y>"),
+        "touch-tap" => Some("touch-tap <x> <y>"),
+        _ => None,
+    }
+}
+
+fn render_tool_usage_arg(
+    tool_name: &str,
+    index: usize,
+    arg: &crate::tool_metadata::ToolArgument,
+) -> String {
+    let token = match (tool_name, index, arg.name.as_str()) {
+        ("element-upload", 1, "file") => "file...".to_string(),
+        _ => arg.name.clone(),
+    };
+
+    if arg.required {
+        format!("<{token}>")
+    } else {
+        format!("[{token}]")
+    }
+}
+
+fn compact_tool_description(name: &str, description: &str) -> String {
+    if !description.starts_with("OpenWalk 内置 ") {
+        return trim_tool_description(description);
+    }
+
+    match name {
+        "page-back" => "页面后退".to_string(),
+        "page-forward" => "页面前进".to_string(),
+        "page-reload" => "刷新当前页面".to_string(),
+        "element-double-click" => "双击匹配元素".to_string(),
+        "element-right-click" => "右键点击匹配元素".to_string(),
+        "element-type" => "向可编辑元素输入文本".to_string(),
+        "element-fill" => "填充输入框文本".to_string(),
+        "keyboard-press" => "按下一个按键".to_string(),
+        "keyboard-type" => "键入一段文本".to_string(),
+        "keyboard-down" => "按下按键但不释放".to_string(),
+        "keyboard-up" => "释放一个按键".to_string(),
+        "element-select" => "选择下拉框选项".to_string(),
+        "element-check" => "勾选匹配元素".to_string(),
+        "element-uncheck" => "取消勾选匹配元素".to_string(),
+        "js-wait" => "等待 JavaScript 条件成立".to_string(),
+        "element-exists" => "检查元素是否存在".to_string(),
+        "element-hover" => "悬停到匹配元素上".to_string(),
+        "page-screenshot" => "保存当前页面截图".to_string(),
+        "element-screenshot" => "保存元素截图".to_string(),
+        "page-pdf" => "导出页面为 PDF".to_string(),
+        "page-wait-navigation" => "等待页面导航完成".to_string(),
+        "page-scroll-to" => "滚动到指定页面坐标".to_string(),
+        "page-scroll-by" => "按偏移量滚动页面".to_string(),
+        "device-viewport" => "设置页面视口尺寸".to_string(),
+        "localstorage-get" => "读取 localStorage 项".to_string(),
+        "localstorage-set" => "写入 localStorage 项".to_string(),
+        "localstorage-remove" => "删除 localStorage 项".to_string(),
+        "localstorage-clear" => "清空 localStorage".to_string(),
+        "localstorage-list" => "列出 localStorage".to_string(),
+        "sessionstorage-get" => "读取 sessionStorage 项".to_string(),
+        "sessionstorage-set" => "写入 sessionStorage 项".to_string(),
+        "sessionstorage-remove" => "删除 sessionStorage 项".to_string(),
+        "sessionstorage-clear" => "清空 sessionStorage".to_string(),
+        "sessionstorage-list" => "列出 sessionStorage".to_string(),
+        "cookie-list" => "列出当前页面 cookies".to_string(),
+        "cookie-get" => "读取指定 cookie".to_string(),
+        "cookie-set" => "写入一个 cookie".to_string(),
+        "cookie-delete" => "删除指定 cookie".to_string(),
+        "cookie-clear" => "清空当前页面 cookies".to_string(),
+        "browser-version" => "读取浏览器版本信息".to_string(),
+        "performance-metrics" => "读取页面性能指标".to_string(),
+        "network-wait-response" => "等待匹配的网络响应".to_string(),
+        "console-clear" => "清空已记录的控制台日志".to_string(),
+        "inspect-info" => "读取元素诊断信息".to_string(),
+        "inspect-highlight" => "高亮匹配元素".to_string(),
+        "inspect-hide-highlight" => "隐藏调试高亮".to_string(),
+        "inspect-pick" => "交互式拾取页面元素".to_string(),
+        "tracing-start" => "开始记录 tracing".to_string(),
+        "tracing-stop" => "停止 tracing 并导出".to_string(),
+        "mouse-move" => "移动鼠标到指定坐标".to_string(),
+        "mouse-click" => "在指定坐标点击鼠标".to_string(),
+        "mouse-down" => "按下鼠标按键".to_string(),
+        "mouse-up" => "释放鼠标按键".to_string(),
+        "mouse-wheel" => "滚动鼠标滚轮".to_string(),
+        "touch-tap" => "模拟触摸点击".to_string(),
+        _ => trim_tool_description(description),
+    }
+}
+
+fn trim_tool_description(description: &str) -> String {
+    description
+        .trim()
+        .trim_end_matches('。')
+        .trim_end_matches('.')
+        .to_string()
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn tool_exists(tool: &str) -> bool {
@@ -1696,10 +1995,47 @@ mod tests {
         let entries = workspace_tool_entries(&workspace).expect("workspace tools should load");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "bing-search");
+        assert_eq!(entries[0].usage, "bing-search");
+        assert_eq!(entries[0].description, "Bing 搜索并返回结构化结果");
+        assert_eq!(entries[0].source, "workspace");
+    }
+
+    #[test]
+    fn tool_usage_from_metadata_renders_required_and_optional_args() {
+        let metadata = scheme_runtime::builtin_tool_metadata("tab-new")
+            .expect("tab-new metadata should exist");
         assert_eq!(
-            entries[0].description.as_deref(),
-            Some("Bing 搜索并返回结构化结果")
+            tool_usage_from_metadata("tab-new", &metadata.args),
+            "tab-new [url]"
         );
+
+        let metadata = scheme_runtime::builtin_tool_metadata("browser-open")
+            .expect("browser-open metadata should exist");
+        assert_eq!(
+            tool_usage_from_metadata("browser-open", &metadata.args),
+            "browser-open <url>"
+        );
+    }
+
+    #[test]
+    fn render_tool_list_lines_aligns_usage_column() {
+        let lines = render_tool_list_lines(&[
+            ToolListEntry {
+                name: "browser-open".to_string(),
+                usage: "browser-open <url>".to_string(),
+                description: "打开浏览器并导航".to_string(),
+                source: "builtin".to_string(),
+            },
+            ToolListEntry {
+                name: "tab-list".to_string(),
+                usage: "tab-list".to_string(),
+                description: "列出所有标签页".to_string(),
+                source: "builtin".to_string(),
+            },
+        ]);
+
+        assert_eq!(lines[0], "browser-open <url>  打开浏览器并导航");
+        assert_eq!(lines[1], "tab-list            列出所有标签页");
     }
 
     #[test]
@@ -1715,6 +2051,61 @@ mod tests {
         assert_eq!(info.source, "host-function");
         assert_eq!(info.script, None);
         assert_eq!(info.metadata.description, "新开标签页并导航到指定 URL。");
+    }
+
+    #[test]
+    fn build_tool_info_view_flattens_builtin_metadata() {
+        let info = build_builtin_tool_info("browser-open").expect("builtin info should load");
+        let view = build_tool_info_view(&info, "browser-open");
+
+        assert_eq!(view.name, "browser-open");
+        assert_eq!(view.usage, "browser-open <url>");
+        assert_eq!(view.description, "新开标签页并导航到指定 URL");
+        assert_eq!(view.source, "builtin");
+        assert!(view.script.is_none());
+        assert_eq!(view.args.len(), 1);
+        assert_eq!(view.options.len(), 4);
+        assert_eq!(view.options[0].name, "-s, --session <name>");
+        assert_eq!(view.options[1].name, "--headed");
+        assert_eq!(view.options[2].name, "--new-tab");
+        assert_eq!(view.options[3].name, "--profile <path>");
+    }
+
+    #[test]
+    fn build_tool_info_view_uses_script_target_for_direct_scripts() {
+        let script_path = PathBuf::from("/tmp/demo.scm");
+        let info = ToolInfoEntry {
+            name: "demo".to_string(),
+            source: "script-path".to_string(),
+            script: Some(script_path.display().to_string()),
+            metadata: ToolMetadata {
+                name: "demo".to_string(),
+                description: "演示脚本".to_string(),
+                args: vec![ToolArgument {
+                    name: "name".to_string(),
+                    arg_type: "string".to_string(),
+                    required: false,
+                    default: None,
+                    description: "名字".to_string(),
+                }],
+                returns: ToolReturn {
+                    return_type: "string".to_string(),
+                    description: "ok".to_string(),
+                },
+                examples: vec!["openwalk run ./demo.scm -- Bloom".to_string()],
+                domains: Vec::new(),
+                read_only: true,
+                requires_login: false,
+                tags: vec!["demo".to_string()],
+            },
+        };
+
+        let view = build_tool_info_view(&info, "./demo.scm");
+
+        assert_eq!(view.source, "script");
+        assert_eq!(view.usage, "./demo.scm [name]");
+        assert!(view.options.is_empty());
+        assert_eq!(view.script.as_deref(), Some("/tmp/demo.scm"));
     }
 
     #[test]
