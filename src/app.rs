@@ -598,7 +598,7 @@ fn print_tool_output(
 
 async fn run_scheme_script(
     global_home: &GlobalHome,
-    mode: &str,
+    _mode: &str,
     script_path: &Path,
     args: &[String],
 ) -> Result<()> {
@@ -610,11 +610,11 @@ async fn run_scheme_script(
             .await;
     let output_payload = result.map(|result| {
         json!({
-            "mode": mode,
+            // "mode": mode,
             "script": script_path.display().to_string(),
             "args": parsed_args.runtime_args,
             "result": scheme_runtime::scheme_value_to_json(&result),
-            "status": "executed",
+            // "status": "executed",
         })
     });
     let shutdown = browser.shutdown().await;
@@ -628,7 +628,7 @@ async fn run_scheme_script(
 
 async fn run_builtin_tool(
     global_home: &GlobalHome,
-    mode: &str,
+    _mode: &str,
     tool: &str,
     args: &[String],
 ) -> Result<()> {
@@ -659,12 +659,12 @@ async fn run_builtin_tool(
     let result = scheme_runtime::execute_builtin(tool, &runtime_args, browser.client()).await;
     let output_payload = result.map(|result| {
         json!({
-            "mode": mode,
+            // "mode": mode,
             "tool": tool,
-            "source": "local-host-function",
+            // "source": "local-host-function",
             "args": runtime_args,
             "result": scheme_runtime::scheme_value_to_json(&result),
-            "status": "executed",
+            // "status": "executed",
         })
     });
     let shutdown = browser.shutdown().await;
@@ -1516,7 +1516,7 @@ mod tests {
         (sandbox, global_home)
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn run_local_executes_scheme_script() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -1541,7 +1541,7 @@ mod tests {
         result.expect("script should run");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn run_local_resolves_workspace_tool_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -2168,7 +2168,7 @@ mod tests {
             .contains("missing a `#| @meta ... |#` header"));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exec_tool_auto_installs_unknown_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2216,7 +2216,7 @@ mod tests {
         assert!(workspace.tool_entry_path("remote.browser.open").exists());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2264,7 +2264,7 @@ mod tests {
         assert!(workspace.tool_entry_path("v2ex/hot").exists());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exec_tool_executes_builtin_host_function() {
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
@@ -2282,7 +2282,7 @@ mod tests {
         .expect("exec should run builtin host functions");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exec_tool_allows_global_packages_without_workspace_init() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2329,7 +2329,7 @@ mod tests {
         assert!(!workspace.is_initialized());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn run_local_rejects_builtin_host_function_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()
