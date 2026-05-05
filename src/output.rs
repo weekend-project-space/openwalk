@@ -19,44 +19,43 @@ pub fn parse_output_format(raw: &str) -> Result<OutputFormat> {
     }
 }
 
-pub fn normalize_result_value(display: &str) -> JsonValue {
-    if display == "#t" {
-        return JsonValue::Bool(true);
-    }
-    if display == "#f" {
-        return JsonValue::Bool(false);
-    }
-
-    if let Ok(value) = serde_json::from_str::<JsonValue>(display) {
-        return value;
-    }
-
-    JsonValue::String(display.to_string())
-}
-
-pub fn print_execution_result(format: OutputFormat, payload: &JsonValue) -> Result<()> {
+/// -------------------------
+/// 统一格式化入口（纯函数）
+/// -------------------------
+pub fn format_execution_result(format: OutputFormat, payload: &JsonValue) -> Result<String> {
     match format {
         OutputFormat::Yaml => {
             let yaml =
                 serde_yaml::to_string(payload).context("failed to serialize execution output")?;
-            print!("{yaml}");
+            Ok(yaml)
         }
-        OutputFormat::Md => print_markdown_execution_result(payload)?,
+        OutputFormat::Md => format_markdown_execution_result(payload),
         OutputFormat::Json => {
             let json = serde_json::to_string_pretty(payload)
                 .context("failed to serialize execution output")?;
-            println!("{json}");
+            Ok(json)
         }
     }
+}
 
+/// -------------------------
+/// 保留原行为：print 只是包装
+/// -------------------------
+pub fn print_execution_result(format: OutputFormat, payload: &JsonValue) -> Result<()> {
+    let out = format_execution_result(format, payload)?;
+    print!("{out}");
     Ok(())
 }
 
-fn print_markdown_execution_result(payload: &JsonValue) -> Result<()> {
+/// -------------------------
+/// Markdown 格式化（纯函数）
+/// -------------------------
+fn format_markdown_execution_result(payload: &JsonValue) -> Result<String> {
     let mut out = String::new();
     out.push_str("# Execution Result\n\n");
 
     let mut has_summary = false;
+
     for key in ["mode", "tool", "script", "source", "status"] {
         if let Some(value) = payload.get(key) {
             has_summary = true;
@@ -67,6 +66,7 @@ fn print_markdown_execution_result(payload: &JsonValue) -> Result<()> {
             out.push('\n');
         }
     }
+
     if has_summary {
         out.push('\n');
     }
@@ -89,10 +89,12 @@ fn print_markdown_execution_result(payload: &JsonValue) -> Result<()> {
         out.push_str("```\n");
     }
 
-    print!("{out}");
-    Ok(())
+    Ok(out)
 }
 
+/// -------------------------
+/// 值的 markdown 内联格式化
+/// -------------------------
 fn inline_markdown_value(value: &JsonValue) -> String {
     match value {
         JsonValue::Null => "null".to_string(),
@@ -102,17 +104,44 @@ fn inline_markdown_value(value: &JsonValue) -> String {
     }
 }
 
+/// -------------------------
+/// YAML body 统一处理
+/// -------------------------
 fn yaml_body(value: &JsonValue) -> Result<String> {
     let mut yaml = serde_yaml::to_string(value).context("failed to serialize execution output")?;
+
     if let Some(rest) = yaml.strip_prefix("---\n") {
         yaml = rest.to_string();
     }
+
     if !yaml.ends_with('\n') {
         yaml.push('\n');
     }
+
     Ok(yaml)
 }
 
+/// -------------------------
+/// normalize 逻辑（保持原样）
+/// -------------------------
+pub fn normalize_result_value(display: &str) -> JsonValue {
+    if display == "#t" {
+        return JsonValue::Bool(true);
+    }
+    if display == "#f" {
+        return JsonValue::Bool(false);
+    }
+
+    if let Ok(value) = serde_json::from_str::<JsonValue>(display) {
+        return value;
+    }
+
+    JsonValue::String(display.to_string())
+}
+
+/// -------------------------
+/// tests
+/// -------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +175,21 @@ mod tests {
     fn normalize_result_value_supports_legacy_scheme_booleans() {
         assert_eq!(normalize_result_value("#t"), json!(true));
         assert_eq!(normalize_result_value("#f"), json!(false));
+    }
+
+    #[test]
+    fn format_md_snapshot() {
+        let input = json!({
+            "mode": "test",
+            "tool": "demo",
+            "status": "ok",
+            "args": {"a": 1},
+            "result": {"b": 2}
+        });
+
+        let md = format_execution_result(OutputFormat::Md, &input).unwrap();
+        assert!(md.contains("# Execution Result"));
+        assert!(md.contains("## Args"));
+        assert!(md.contains("## Result"));
     }
 }

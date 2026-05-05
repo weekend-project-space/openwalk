@@ -39,7 +39,7 @@ pub struct InitArgs {
     #[arg(long)]
     pub name: Option<String>,
 
-    /// Pre-populate the tools map with comma-separated names, e.g. --tools=v2ex-hot,bing-search
+    /// Pre-populate the tools map with comma-separated names, e.g. --tools=v2ex/hot,bing-search
     #[arg(long, value_delimiter = ',')]
     pub tools: Vec<String>,
 
@@ -121,7 +121,7 @@ mod tests {
             "openwalk",
             "init",
             "--name=my-walk",
-            "--tools=v2ex-hot,bing-search",
+            "--tools=v2ex/hot,bing-search",
             "--force",
             "--format=json",
         ])
@@ -130,7 +130,7 @@ mod tests {
         match cli.command {
             Command::Init(args) => {
                 assert_eq!(args.name.as_deref(), Some("my-walk"));
-                assert_eq!(args.tools, vec!["v2ex-hot", "bing-search"]);
+                assert_eq!(args.tools, vec!["v2ex/hot", "bing-search"]);
                 assert!(args.force);
                 assert_eq!(args.format, "json");
             }

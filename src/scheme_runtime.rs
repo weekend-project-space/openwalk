@@ -10,11 +10,14 @@ use scheme4r::{
     Environment, Scheme, SchemeError, SchemeString, Value,
 };
 
-use crate::browser::{
-    list_browser_sessions, parse_mouse_button, BrowserClient, BrowserCommand, BrowserValue,
-};
-use crate::tool_metadata::{ToolArgument, ToolMetadata, ToolReturn};
 use crate::workspace::GlobalHome;
+use crate::{
+    browser::{
+        list_browser_sessions, parse_mouse_button, BrowserClient, BrowserCommand, BrowserValue,
+    },
+    output::{format_execution_result, parse_output_format, OutputFormat},
+    tool_metadata::{ToolArgument, ToolMetadata, ToolReturn},
+};
 
 thread_local! {
     static HOST_CONTEXT: RefCell<Option<HostContext>> = const { RefCell::new(None) };
@@ -504,8 +507,7 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
         },
         "console" => ToolMetadata {
             name: name.to_string(),
-            description: "读取当前页面已记录的控制台日志；可选按最低级别过滤。"
-                .to_string(),
+            description: "读取当前页面已记录的控制台日志；可选按最低级别过滤。".to_string(),
             args: vec![tool_arg(
                 "min-level",
                 "string",
@@ -615,6 +617,27 @@ fn install_host_context(context: HostContext) -> HostContextGuard {
     HostContextGuard
 }
 
+// output-format
+fn output_format(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity_range("display-format", args, 1, 2)?;
+    let json = scheme_value_to_json(&args[0]);
+    let format = if args.len() == 2 {
+        match &args[1] {
+            Value::String(s) => s.to_plain_string(),
+            _ => return Err(SchemeError::runtime("format type_error: yaml | md | json")),
+        }
+    } else {
+        "yaml".to_string()
+    };
+    let fmt: OutputFormat =
+        parse_output_format(&format).map_err(|e| SchemeError::runtime(e.to_string()))?;
+
+    let output =
+        format_execution_result(fmt, &json).map_err(|e| SchemeError::runtime(e.to_string()))?;
+
+    Ok(Value::String(SchemeString::new(output)))
+}
+
 fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
     let mut env_ref = env.borrow_mut();
 
@@ -625,6 +648,11 @@ fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
     env_ref.define(
         "openwalk-args",
         Value::list(args.iter().cloned().map(Value::string).collect()),
+    );
+    // env_ref.define("display-format", Value(()));
+    env_ref.define(
+        "openwalk-output-format",
+        Value::builtin("openwalk-output-format", output_format),
     );
 
     register_browser_builtins!(
@@ -860,7 +888,7 @@ fn register_browser_builtin(env: &mut scheme4r::Environment, scheme_name: &str, 
     env.define(scheme_name, Value::builtin(scheme_name, func));
 }
 
-define_browser_builtin!(browser_open, "browser-open", [url => expect_string], BrowserCommand::Open { url });
+define_browser_builtin!(browser_open, "browser-open", [url => expect_string], BrowserCommand::Open { url});
 define_browser_builtin!(browser_goto, "page-goto", [url => expect_string], BrowserCommand::Goto { url });
 define_browser_builtin!(browser_back, "page-back", [], BrowserCommand::Back);
 define_browser_builtin!(browser_forward, "page-forward", [], BrowserCommand::Forward);
@@ -1319,7 +1347,7 @@ fn browser_value_to_scheme(value: BrowserValue) -> Value {
         BrowserValue::Number(value) => Value::Number(value),
         BrowserValue::String(value) => Value::String(SchemeString::new(value)),
         BrowserValue::Array(values) => {
-            Value::vector(values.into_iter().map(browser_value_to_scheme).collect())
+            Value::list(values.into_iter().map(browser_value_to_scheme).collect())
         }
         BrowserValue::Object(values) => Value::list(
             values
@@ -1784,11 +1812,8 @@ mod tests {
     #[test]
     fn browser_console_rejects_extra_arguments() {
         let engine = Engine::new(Environment::standard());
-        let error = browser_console(
-            &engine,
-            &[Value::string("warn"), Value::string("extra")],
-        )
-        .expect_err("console should only allow an optional min-level");
+        let error = browser_console(&engine, &[Value::string("warn"), Value::string("extra")])
+            .expect_err("console should only allow an optional min-level");
 
         assert!(error
             .to_string()

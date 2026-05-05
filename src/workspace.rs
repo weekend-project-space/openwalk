@@ -794,7 +794,7 @@ mod tests {
         let summary = workspace
             .init_with_options(InitOptions {
                 name: Some("my-walk".to_string()),
-                tools: vec!["v2ex-hot".to_string(), "bing-search".to_string()],
+                tools: vec!["v2ex/hot".to_string(), "bing-search".to_string()],
                 force: false,
             })
             .expect("workspace should initialize with options");
@@ -806,7 +806,7 @@ mod tests {
         let manifest = workspace.load_manifest().expect("manifest should load");
         assert_eq!(manifest.package.name, "my-walk");
         assert_eq!(manifest.tools.len(), 2);
-        assert!(manifest.tools.contains_key("v2ex-hot"));
+        assert!(manifest.tools.contains_key("v2ex/hot"));
         assert!(manifest.tools.contains_key("bing-search"));
     }
 

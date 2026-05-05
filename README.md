@@ -130,6 +130,7 @@ cargo run -- exec browser-close -s=qa
 
 ```bash
 cargo run -- exec browser-open https://example.com --headed
+cargo run -- exec browser-open https://example.com --new-tab -s=qa
 cargo run -- exec browser-open https://example.com --profile /tmp/openwalk-profile
 ```
 

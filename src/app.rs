@@ -64,6 +64,7 @@ struct BrowserLaunchOptions {
     headless: Option<bool>,
     profile: Option<PathBuf>,
     create_session_if_missing: bool,
+    new_tab: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +95,7 @@ impl Default for BrowserLaunchOptions {
             headless: None,
             profile: None,
             create_session_if_missing: true,
+            new_tab: false,
         }
     }
 }
@@ -602,7 +604,7 @@ async fn run_scheme_script(
     script_path: &Path,
     args: &[String],
 ) -> Result<()> {
-    let parsed_args = extract_common_runtime_args(args)?;
+    let parsed_args: RuntimeInvocationArgs = extract_common_runtime_args(args)?;
     let launch_options = BrowserLaunchOptions::with_session(parsed_args.session.clone());
     let browser = create_browser_service(global_home, launch_options).await?;
     let result =
@@ -642,6 +644,7 @@ async fn run_builtin_tool(
         if open_options.profile.is_some() {
             launch_options.profile = open_options.profile;
         }
+        launch_options.new_tab = open_options.new_tab;
         args
     } else if tool == "browser-close" {
         parse_browser_close_runtime_args(&parsed_args.runtime_args)?;
@@ -770,6 +773,11 @@ fn parse_browser_open_runtime_args(args: &[String]) -> Result<(Vec<String>, Brow
             index += 1;
             continue;
         }
+        if arg == "--new-tab" {
+            launch_options.new_tab = true;
+            index += 1;
+            continue;
+        }
         if arg == "--profile" {
             let value = args.get(index + 1).ok_or_else(|| {
                 anyhow::anyhow!("`browser-open` expects a profile path after `--profile`")
@@ -795,7 +803,7 @@ fn parse_browser_open_runtime_args(args: &[String]) -> Result<(Vec<String>, Brow
         }
         if arg.starts_with('-') {
             bail!(
-                "`browser-open` does not support option `{arg}`. Supported options are `--headed` and `--profile`"
+                "`browser-open` does not support option `{arg}`. Supported options are `--headed`, `--profile`, and `--new-tab`"
             );
         }
         positional.push(arg.clone());
@@ -825,6 +833,7 @@ async fn create_browser_service(
         let session_options = BrowserSessionLaunchOptions {
             requested_headless: launch_options.headless,
             requested_profile_dir: launch_options.profile.clone(),
+            new_tab: launch_options.new_tab,
         };
         let handle = if launch_options.create_session_if_missing {
             ensure_browser_session_with_options(global_home, session_name, session_options).await?
@@ -1997,6 +2006,20 @@ mod tests {
     }
 
     #[test]
+    fn extract_common_runtime_args_preserves_browser_specific_flags() {
+        let parsed = extract_common_runtime_args(&[
+            "--new-tab".to_string(),
+            "https://example.com".to_string(),
+        ])
+        .expect("runtime args should preserve browser-only flags");
+
+        assert_eq!(
+            parsed.runtime_args,
+            vec!["--new-tab".to_string(), "https://example.com".to_string()]
+        );
+    }
+
+    #[test]
     fn extract_common_runtime_args_rejects_unknown_format() {
         let error = extract_common_runtime_args(&["--format=toml".to_string()])
             .expect_err("unknown format should fail");
@@ -2008,12 +2031,14 @@ mod tests {
         let (args, options) = parse_browser_open_runtime_args(&[
             "https://example.com".to_string(),
             "--headed".to_string(),
+            "--new-tab".to_string(),
             "--profile=/tmp/openwalk-profile".to_string(),
         ])
         .expect("browser-open args should parse");
 
         assert_eq!(args, vec!["https://example.com".to_string()]);
         assert_eq!(options.headless, Some(false));
+        assert!(options.new_tab);
         assert_eq!(
             options.profile,
             Some(PathBuf::from("/tmp/openwalk-profile"))

@@ -119,8 +119,13 @@ impl BrowserActor {
         let buffered_entries = self
             .load_console_buffer_entries(&page, page_id.as_str())
             .await
-            .unwrap_or_else(|_| self.console_page_entries(page_id.as_str()).unwrap_or_default());
-        let tracked_entries = self.console_page_entries(page_id.as_str()).unwrap_or_default();
+            .unwrap_or_else(|_| {
+                self.console_page_entries(page_id.as_str())
+                    .unwrap_or_default()
+            });
+        let tracked_entries = self
+            .console_page_entries(page_id.as_str())
+            .unwrap_or_default();
         let entries = merge_console_entries(buffered_entries, tracked_entries);
         let base_timestamp = self
             .page_time_origin_seconds(&page)
@@ -880,8 +885,7 @@ const CONSOLE_BUFFER_INSTALL_EVAL_JS: &str = r#"() => {
     return true;
 }"#;
 
-const CONSOLE_BUFFER_READ_EVAL_JS: &str =
-    r#"() => Array.isArray(window.__openwalkConsoleEntries) ? window.__openwalkConsoleEntries : []"#;
+const CONSOLE_BUFFER_READ_EVAL_JS: &str = r#"() => Array.isArray(window.__openwalkConsoleEntries) ? window.__openwalkConsoleEntries : []"#;
 
 const CONSOLE_BUFFER_CLEAR_EVAL_JS: &str = r#"() => {
     window.__openwalkConsoleEntries = [];
