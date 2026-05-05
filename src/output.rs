@@ -122,60 +122,12 @@ fn yaml_body(value: &JsonValue) -> Result<String> {
 }
 
 /// -------------------------
-/// normalize 逻辑（保持原样）
-/// -------------------------
-pub fn normalize_result_value(display: &str) -> JsonValue {
-    if display == "#t" {
-        return JsonValue::Bool(true);
-    }
-    if display == "#f" {
-        return JsonValue::Bool(false);
-    }
-
-    if let Ok(value) = serde_json::from_str::<JsonValue>(display) {
-        return value;
-    }
-
-    JsonValue::String(display.to_string())
-}
-
-/// -------------------------
 /// tests
 /// -------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn normalize_result_value_preserves_json_strings() {
-        assert_eq!(
-            normalize_result_value("\"42\""),
-            JsonValue::String("42".to_string())
-        );
-        assert_eq!(
-            normalize_result_value("\"true\""),
-            JsonValue::String("true".to_string())
-        );
-        assert_eq!(
-            normalize_result_value("\"{\\\"a\\\":1}\""),
-            JsonValue::String("{\"a\":1}".to_string())
-        );
-    }
-
-    #[test]
-    fn normalize_result_value_parses_non_string_json_values() {
-        assert_eq!(normalize_result_value("42"), json!(42));
-        assert_eq!(normalize_result_value("true"), json!(true));
-        assert_eq!(normalize_result_value("[1,2]"), json!([1, 2]));
-        assert_eq!(normalize_result_value("{\"a\":1}"), json!({ "a": 1 }));
-    }
-
-    #[test]
-    fn normalize_result_value_supports_legacy_scheme_booleans() {
-        assert_eq!(normalize_result_value("#t"), json!(true));
-        assert_eq!(normalize_result_value("#f"), json!(false));
-    }
 
     #[test]
     fn format_md_snapshot() {

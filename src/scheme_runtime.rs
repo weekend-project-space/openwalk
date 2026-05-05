@@ -6,7 +6,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use scheme4r::{
     eval::Engine,
-    runtime::{procedure::Procedure, BuiltinFn, EnvRef},
+    runtime::{procedure::Procedure, BuiltinFn, EnvRef, ErrorObject, ErrorObjectKind},
     Environment, Scheme, SchemeError, SchemeString, Value,
 };
 
@@ -154,32 +154,24 @@ pub async fn execute_script(
     script_path: &Path,
     args: &[String],
     browser: BrowserClient,
-) -> Result<String> {
+) -> Result<Value> {
     let source = tokio::fs::read_to_string(script_path)
         .await
         .with_context(|| format!("failed to read script {}", script_path.display()))?;
     let script_path = script_path.to_path_buf();
     let args = args.to_vec();
 
-    tokio::task::spawn_blocking(move || execute_script_sync(script_path, source, args, browser))
-        .await
-        .context("scheme execution task failed to join")?
+    tokio::task::block_in_place(|| execute_script_sync(script_path, source, args, browser))
 }
 
-pub async fn execute_builtin(
-    name: &str,
-    args: &[String],
-    browser: BrowserClient,
-) -> Result<String> {
+pub async fn execute_builtin(name: &str, args: &[String], browser: BrowserClient) -> Result<Value> {
     let name = name.to_string();
     let args = args.to_vec();
 
-    tokio::task::spawn_blocking(move || execute_builtin_sync(name, args, browser))
-        .await
-        .context("builtin execution task failed to join")?
+    tokio::task::block_in_place(|| execute_builtin_sync(name, args, browser))
 }
 
-fn execute_builtin_sync(name: String, args: Vec<String>, browser: BrowserClient) -> Result<String> {
+fn execute_builtin_sync(name: String, args: Vec<String>, browser: BrowserClient) -> Result<Value> {
     if !SCHEME_BUILTINS.contains(&name.as_str()) {
         bail!("unknown builtin host function `{name}`");
     }
@@ -194,9 +186,9 @@ fn execute_builtin_sync(name: String, args: Vec<String>, browser: BrowserClient)
 
     let _guard = install_host_context(HostContext { browser });
     let value = builtin(&engine, &cli_args)
-        .map_err(|err| anyhow::anyhow!("builtin `{name}` execution failed: {err}"))?;
+        .map_err(|err| scheme_error_to_anyhow(format!("builtin `{name}` execution failed"), err))?;
 
-    Ok(scheme_value_to_json(&value).to_string())
+    Ok(value)
 }
 
 pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
@@ -587,7 +579,7 @@ fn execute_script_sync(
     source: String,
     args: Vec<String>,
     browser: BrowserClient,
-) -> Result<String> {
+) -> Result<Value> {
     let env = Environment::standard();
     install_openwalk_bindings(env.clone(), &script_path, &args);
     let scheme = Scheme::with_env(env);
@@ -595,19 +587,20 @@ fn execute_script_sync(
     let _guard = install_host_context(HostContext { browser });
     let loaded_value = scheme
         .eval(&source)
-        .map_err(|err| anyhow::anyhow!("scheme execution failed while loading script: {err}"))?;
+        .map_err(|err| scheme_error_to_anyhow("scheme execution failed while loading script", err))?;
 
-    let value = match scheme.eval("(main openwalk-args)") {
+    let value: Value = match scheme.eval("(main openwalk-args)") {
         Ok(value) => value,
         Err(err) if is_missing_main(&err) => loaded_value,
         Err(err) => {
-            return Err(anyhow::anyhow!(
-                "scheme execution failed while calling `main`: {err}"
+            return Err(scheme_error_to_anyhow(
+                "scheme execution failed while calling `main`",
+                err,
             ));
         }
     };
 
-    Ok(scheme_value_to_json(&value).to_string())
+    Ok(value)
 }
 
 fn install_host_context(context: HostContext) -> HostContextGuard {
@@ -1232,8 +1225,33 @@ fn call_browser(command: BrowserCommand) -> Result<Value, SchemeError> {
             .browser
             .call(command)
             .map(browser_value_to_scheme)
-            .map_err(|err| SchemeError::runtime(format!("{err:#}")))
+            .map_err(|err| scheme_host_error(err))
     })
+}
+
+fn scheme_host_error(err: anyhow::Error) -> SchemeError {
+    let message = format!("{err:#}");
+    let object = Value::error_object(ErrorObject::new(
+        ErrorObjectKind::General,
+        message,
+        Vec::new(),
+    ));
+    SchemeError::raised(object, true)
+}
+
+fn scheme_error_to_anyhow(context: impl Into<String>, err: SchemeError) -> anyhow::Error {
+    let context = context.into();
+    if let Some((object, _continuable)) = err.as_raised() {
+        return anyhow::anyhow!("{context}: {}", scheme_exception_message(object));
+    }
+    anyhow::anyhow!("{context}: {err}")
+}
+
+fn scheme_exception_message(value: &Value) -> String {
+    match value {
+        Value::ErrorObject(error) => error.message().to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn with_host_context<T>(
@@ -1358,7 +1376,7 @@ fn browser_value_to_scheme(value: BrowserValue) -> Value {
     }
 }
 
-fn scheme_value_to_json(value: &Value) -> serde_json::Value {
+pub fn scheme_value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Boolean(value) => serde_json::Value::Bool(*value),
         Value::Number(value) => serde_json::Value::Number((*value).into()),
@@ -1532,7 +1550,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_runs_plain_scheme_without_browser() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("math.scm");
@@ -1548,10 +1566,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "6");
+        assert_eq!(expect_test_number(&result), 6);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_exposes_openwalk_args() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("args.scm");
@@ -1567,10 +1585,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "\"hello\"");
+        assert_eq!(expect_test_string(&result), "hello");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_calls_main_with_cli_args() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("main.scm");
@@ -1589,10 +1607,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "\"from-cli\"");
+        assert_eq!(expect_test_string(&result), "from-cli");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_falls_back_to_top_level_value_without_main() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("fallback.scm");
@@ -1607,10 +1625,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "42");
+        assert_eq!(expect_test_number(&result), 42);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_supports_domain_style_builtins() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("domain-names.scm");
@@ -1629,10 +1647,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "\"domain-ok\"");
+        assert_eq!(expect_test_string(&result), "domain-ok");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_rejects_legacy_browser_builtin_names() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("legacy-name.scm");
@@ -1653,7 +1671,7 @@ mod tests {
             .contains("undefined variable: browser-goto"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_rejects_legacy_browser_tab_builtin_names() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("legacy-tab-name.scm");
@@ -1674,7 +1692,7 @@ mod tests {
             .contains("undefined variable: browser-tabs"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_script_rejects_pre_refactor_scheme_names() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("legacy-domain-name.scm");
@@ -1820,7 +1838,7 @@ mod tests {
             .contains("`console` expects between 0 and 1 argument(s)"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_builtin_supports_cli_number_arguments() {
         let browser = crate::browser::BrowserService::spawn();
         let result = execute_builtin("time-sleep", &[String::from("0")], browser.client())
@@ -1831,10 +1849,10 @@ mod tests {
             .await
             .expect("browser service should stop");
 
-        assert_eq!(result, "true");
+        assert!(expect_test_bool(&result));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn execute_builtin_tab_new_requires_browser_open_first() {
         let browser = crate::browser::BrowserService::spawn();
         let error = execute_builtin("tab-new", &[], browser.client())
@@ -1846,6 +1864,39 @@ mod tests {
             .expect("browser service should stop");
 
         let message = error.to_string();
+        assert!(message.contains("tab-new"));
+        assert!(message.contains("browser-open"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_script_with_exception_handler_catches_host_tool_error() {
+        let sandbox = TestDir::new();
+        let script_path = sandbox.path.join("with-exception-handler.scm");
+        fs::write(
+            &script_path,
+            r#"
+            (define (main args)
+              (with-exception-handler
+                (lambda (e)
+                  (if (error-object? e)
+                      (error-object-message e)
+                      "unexpected"))
+                (lambda ()
+                  (tab-new))))
+            "#,
+        )
+        .expect("script should be written");
+
+        let browser = crate::browser::BrowserService::spawn();
+        let result = execute_script(&script_path, &[], browser.client())
+            .await
+            .expect("script should catch host tool failure");
+        browser
+            .shutdown()
+            .await
+            .expect("browser service should stop");
+
+        let message = expect_test_string(&result);
         assert!(message.contains("tab-new"));
         assert!(message.contains("browser-open"));
     }
@@ -1918,6 +1969,20 @@ mod tests {
         match value {
             Value::String(text) => text.to_plain_string(),
             other => panic!("expected string, got {other}"),
+        }
+    }
+
+    fn expect_test_number(value: &Value) -> i64 {
+        match value {
+            Value::Number(number) => *number,
+            other => panic!("expected number, got {other}"),
+        }
+    }
+
+    fn expect_test_bool(value: &Value) -> bool {
+        match value {
+            Value::Boolean(boolean) => *boolean,
+            other => panic!("expected boolean, got {other}"),
         }
     }
 }

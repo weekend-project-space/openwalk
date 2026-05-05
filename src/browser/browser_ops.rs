@@ -111,17 +111,6 @@ impl BrowserActor {
         self.browser = Some(browser);
         self.handler_task = Some(handler_task);
 
-        if let Some(active_target_id) = session.active_target_id().map(str::to_owned) {
-            let browser = self.browser.as_ref().expect("browser should be available");
-            if let Ok(page) = browser.get_page(TargetId::from(active_target_id)).await {
-                self.pages = vec![page];
-                self.active_page = Some(0);
-                self.persist_current_active_page()?;
-                self.mode = BrowserLaunchMode::Session(session);
-                return Ok(());
-            }
-        }
-
         self.refresh_pages_from_connected_browser().await?;
 
         if self.active_page.is_none() && self.pages.is_empty() {

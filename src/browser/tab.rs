@@ -1,11 +1,21 @@
 use std::collections::HashMap;
 
+use serde::Deserialize;
+
 use super::{
     actor::BrowserActor,
     types::{BrowserLaunchMode, BrowserTabInfo, BrowserValue},
     util::serialize_to_browser_value,
     *,
 };
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+struct PageAttentionState {
+    #[serde(default)]
+    visible: bool,
+    #[serde(default)]
+    focused: bool,
+}
 
 impl BrowserActor {
     const TAB_ID_ABBREV_MIN: usize = 7;
@@ -72,17 +82,17 @@ impl BrowserActor {
             previous_active.as_deref(),
         )
         .await;
+        let page_ids = latest
+            .iter()
+            .map(|page| page.target_id().as_ref().to_string())
+            .collect::<Vec<_>>();
+        let attention_states = page_attention_states(latest.as_slice()).await;
         self.pages = latest;
-        self.active_page = if self.pages.is_empty() {
-            None
-        } else if let Some(id) = previous_active {
-            self.pages
-                .iter()
-                .position(|page| page.target_id().as_ref() == id)
-                .or(Some(0))
-        } else {
-            Some(0)
-        };
+        self.active_page = resolve_active_page_index(
+            page_ids.as_slice(),
+            attention_states.as_slice(),
+            previous_active.as_deref(),
+        );
         self.persist_current_active_page()?;
         Ok(())
     }
@@ -129,7 +139,7 @@ impl BrowserActor {
         self.ensure_network_tracking_for_page(page.clone()).await?;
         self.ensure_console_tracking_for_page(page.clone()).await?;
         if let Some(url) = url {
-            page.goto(url.as_str())
+            super::page::navigate_page_to_url(&page, url.as_str())
                 .await
                 .with_context(|| format!("failed to navigate tab to `{url}`"))?;
         }
@@ -217,6 +227,67 @@ impl BrowserActor {
             .collect::<Vec<_>>();
         resolve_tab_reference_index_in_ids(raw_tab_ref, &ids, Self::TAB_ID_ABBREV_MIN)
     }
+}
+
+async fn page_attention_states(pages: &[Page]) -> Vec<PageAttentionState> {
+    let mut states = Vec::with_capacity(pages.len());
+    for page in pages {
+        states.push(page_attention_state(page).await);
+    }
+    states
+}
+
+async fn page_attention_state(page: &Page) -> PageAttentionState {
+    page.evaluate(
+        "() => ({ visible: document.visibilityState === 'visible', focused: typeof document.hasFocus === 'function' && document.hasFocus() })",
+    )
+    .await
+    .ok()
+    .and_then(|value| value.into_value().ok())
+    .unwrap_or_default()
+}
+
+fn resolve_active_page_index(
+    page_ids: &[String],
+    attention_states: &[PageAttentionState],
+    preferred_active_id: Option<&str>,
+) -> Option<usize> {
+    if page_ids.is_empty() {
+        return None;
+    }
+
+    let preferred_index = preferred_active_id
+        .and_then(|preferred| page_ids.iter().position(|page_id| page_id == preferred));
+
+    let focused = attention_states
+        .iter()
+        .enumerate()
+        .filter_map(|(index, state)| state.focused.then_some(index))
+        .collect::<Vec<_>>();
+    if focused.len() == 1 {
+        return focused.first().copied();
+    }
+    if let Some(preferred_index) = preferred_index {
+        if focused.contains(&preferred_index) {
+            return Some(preferred_index);
+        }
+    }
+
+    let visible = attention_states
+        .iter()
+        .enumerate()
+        .filter_map(|(index, state)| state.visible.then_some(index))
+        .collect::<Vec<_>>();
+    if visible.len() == 1 {
+        return visible.first().copied();
+    }
+    if let Some(preferred_index) = preferred_index {
+        if visible.contains(&preferred_index) {
+            return Some(preferred_index);
+        }
+    }
+
+    preferred_index.or(Some(0))
 }
 
 fn resolve_tab_reference_index_in_ids(
@@ -339,6 +410,73 @@ mod tests {
 
     fn ids(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_active_page_index_prefers_unique_focused_tab() {
+        let ids = ids(&["tab-a", "tab-b"]);
+        let states = vec![
+            PageAttentionState {
+                visible: false,
+                focused: false,
+            },
+            PageAttentionState {
+                visible: true,
+                focused: true,
+            },
+        ];
+
+        let resolved = resolve_active_page_index(&ids, &states, Some("tab-a"));
+
+        assert_eq!(resolved, Some(1));
+    }
+
+    #[test]
+    fn resolve_active_page_index_prefers_unique_visible_tab_when_focus_is_missing() {
+        let ids = ids(&["tab-a", "tab-b"]);
+        let states = vec![
+            PageAttentionState {
+                visible: false,
+                focused: false,
+            },
+            PageAttentionState {
+                visible: true,
+                focused: false,
+            },
+        ];
+
+        let resolved = resolve_active_page_index(&ids, &states, Some("tab-a"));
+
+        assert_eq!(resolved, Some(1));
+    }
+
+    #[test]
+    fn resolve_active_page_index_falls_back_to_recorded_tab_when_visible_tabs_are_ambiguous() {
+        let ids = ids(&["tab-a", "tab-b"]);
+        let states = vec![
+            PageAttentionState {
+                visible: true,
+                focused: false,
+            },
+            PageAttentionState {
+                visible: true,
+                focused: false,
+            },
+        ];
+
+        let resolved = resolve_active_page_index(&ids, &states, Some("tab-b"));
+
+        assert_eq!(resolved, Some(1));
+    }
+
+    #[test]
+    fn resolve_active_page_index_falls_back_to_first_tab_without_signal() {
+        let ids = ids(&["tab-a", "tab-b"]);
+        let states = vec![PageAttentionState::default(), PageAttentionState::default()];
+
+        let resolved = resolve_active_page_index(&ids, &states, None);
+
+        assert_eq!(resolved, Some(0));
     }
 
     #[test]

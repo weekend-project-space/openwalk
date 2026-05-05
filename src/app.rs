@@ -13,7 +13,7 @@ use crate::{
         BrowserSessionLaunchOptions, EphemeralLaunchOptions,
     },
     cli::{Cli, Command, InitArgs, ProjectInstallArgs, ToolCommand, ToolExecArgs},
-    output::{normalize_result_value, parse_output_format, print_execution_result, OutputFormat},
+    output::{parse_output_format, print_execution_result, OutputFormat},
     scheme_runtime,
     tool_hub::install_tool_from_hub,
     tool_metadata::{load_tool_metadata, ToolArgument, ToolMetadata, ToolReturn},
@@ -608,20 +608,20 @@ async fn run_scheme_script(
     let result =
         scheme_runtime::execute_script(script_path, &parsed_args.runtime_args, browser.client())
             .await;
-    let shutdown = browser.shutdown().await;
-
-    let display = result?;
-    shutdown?;
-    print_execution_result(
-        parsed_args.output_format,
-        &json!({
+    let output_payload = result.map(|result| {
+        json!({
             "mode": mode,
             "script": script_path.display().to_string(),
             "args": parsed_args.runtime_args,
-            "result": normalize_result_value(display.as_str()),
+            "result": scheme_runtime::scheme_value_to_json(&result),
             "status": "executed",
-        }),
-    )?;
+        })
+    });
+    let shutdown = browser.shutdown().await;
+
+    let payload = output_payload?;
+    shutdown?;
+    print_execution_result(parsed_args.output_format, &payload)?;
 
     Ok(())
 }
@@ -657,21 +657,21 @@ async fn run_builtin_tool(
     };
     let browser = create_browser_service(global_home, launch_options).await?;
     let result = scheme_runtime::execute_builtin(tool, &runtime_args, browser.client()).await;
-    let shutdown = browser.shutdown().await;
-
-    let display = result?;
-    shutdown?;
-    print_execution_result(
-        parsed_args.output_format,
-        &json!({
+    let output_payload = result.map(|result| {
+        json!({
             "mode": mode,
             "tool": tool,
             "source": "local-host-function",
             "args": runtime_args,
-            "result": normalize_result_value(display.as_str()),
+            "result": scheme_runtime::scheme_value_to_json(&result),
             "status": "executed",
-        }),
-    )?;
+        })
+    });
+    let shutdown = browser.shutdown().await;
+
+    let payload = output_payload?;
+    shutdown?;
+    print_execution_result(parsed_args.output_format, &payload)?;
 
     Ok(())
 }
@@ -1516,7 +1516,7 @@ mod tests {
         (sandbox, global_home)
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_executes_scheme_script() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -1541,7 +1541,7 @@ mod tests {
         result.expect("script should run");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_resolves_workspace_tool_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -2168,7 +2168,7 @@ mod tests {
             .contains("missing a `#| @meta ... |#` header"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_auto_installs_unknown_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2216,7 +2216,7 @@ mod tests {
         assert!(workspace.tool_entry_path("remote.browser.open").exists());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2264,7 +2264,7 @@ mod tests {
         assert!(workspace.tool_entry_path("v2ex/hot").exists());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_executes_builtin_host_function() {
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
@@ -2282,7 +2282,7 @@ mod tests {
         .expect("exec should run builtin host functions");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_allows_global_packages_without_workspace_init() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2329,7 +2329,7 @@ mod tests {
         assert!(!workspace.is_initialized());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_rejects_builtin_host_function_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()

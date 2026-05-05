@@ -1,7 +1,7 @@
 use super::{
     actor::BrowserActor,
     types::{BrowserValue, Locator},
-    util::{json_to_browser_value, locator_name},
+    util::{browser_request_timeout, json_to_browser_value, locator_name},
     *,
 };
 
@@ -12,38 +12,45 @@ impl BrowserActor {
             bail!("cannot `page-goto` from an internal browser page; call `browser-open` instead");
         }
 
-        page.goto(url.as_str())
-            .await
-            .with_context(|| format!("failed to navigate current page to `{url}`"))?;
-        Ok(BrowserValue::String(page.url().await?.unwrap_or(url)))
+        let final_url = navigate_page_to_url(&page, url.as_str()).await?;
+        Ok(BrowserValue::String(final_url))
     }
 
     pub(super) async fn back(&mut self) -> Result<BrowserValue> {
         let page = self.require_page_ready().await?;
-        page.evaluate("history.back()")
-            .await
-            .context("failed to navigate back")?;
-        page.wait_for_navigation()
-            .await
-            .context("failed while waiting for back navigation")?;
-        Ok(BrowserValue::String(page.url().await?.unwrap_or_default()))
+        let final_url = run_navigation_script_and_wait_for_dom_content_loaded(
+            &page,
+            "() => { history.back(); return true; }",
+            "failed to navigate back",
+            None,
+        )
+        .await?;
+        Ok(BrowserValue::String(final_url))
     }
 
     pub(super) async fn forward(&mut self) -> Result<BrowserValue> {
         let page = self.require_page_ready().await?;
-        page.evaluate("history.forward()")
-            .await
-            .context("failed to navigate forward")?;
-        page.wait_for_navigation()
-            .await
-            .context("failed while waiting for forward navigation")?;
-        Ok(BrowserValue::String(page.url().await?.unwrap_or_default()))
+        let final_url = run_navigation_script_and_wait_for_dom_content_loaded(
+            &page,
+            "() => { history.forward(); return true; }",
+            "failed to navigate forward",
+            None,
+        )
+        .await?;
+        Ok(BrowserValue::String(final_url))
     }
 
     pub(super) async fn reload(&mut self) -> Result<BrowserValue> {
         let page = self.require_page_ready().await?;
-        page.reload().await.context("failed to reload the page")?;
-        Ok(BrowserValue::String(page.url().await?.unwrap_or_default()))
+        let fallback_url = page.url().await?.unwrap_or_default();
+        let final_url = run_navigation_script_and_wait_for_dom_content_loaded(
+            &page,
+            "() => { window.location.reload(); return true; }",
+            "failed to reload the page",
+            Some(fallback_url.as_str()),
+        )
+        .await?;
+        Ok(BrowserValue::String(final_url))
     }
 
     pub(super) async fn wait_navigation(&mut self) -> Result<BrowserValue> {
@@ -122,6 +129,178 @@ impl BrowserActor {
             .context("failed to scroll page by delta")?;
         Ok(BrowserValue::Boolean(true))
     }
+}
+
+pub(super) async fn navigate_page_to_url(page: &Page, url: &str) -> Result<String> {
+    let expression = format!("() => {{ window.location.href = {url:?}; return true; }}");
+    let error_context = format!("failed to navigate current page to `{url}`");
+    run_navigation_script_and_wait_for_dom_content_loaded(
+        page,
+        expression.as_str(),
+        error_context.as_str(),
+        Some(url),
+    )
+    .await
+}
+
+async fn run_navigation_script_and_wait_for_dom_content_loaded(
+    page: &Page,
+    expression: &str,
+    error_context: &str,
+    fallback_url: Option<&str>,
+) -> Result<String> {
+    let mut frame_navigated_events = page
+        .event_listener::<EventFrameNavigated>()
+        .await
+        .context("failed to subscribe to frame navigation events")?;
+    let mut lifecycle_events = page
+        .event_listener::<EventLifecycleEvent>()
+        .await
+        .context("failed to subscribe to page lifecycle events")?;
+    let mut same_document_events = page
+        .event_listener::<EventNavigatedWithinDocument>()
+        .await
+        .context("failed to subscribe to same-document navigation events")?;
+
+    if let Err(err) = page.evaluate(expression).await {
+        if !is_navigation_context_interrupted(&err) {
+            return Err(err).context(error_context.to_string());
+        }
+    }
+
+    let committed =
+        wait_for_navigation_commit(page, &mut frame_navigated_events, &mut same_document_events)
+            .await
+            .with_context(|| error_context.to_string())?;
+
+    wait_for_dom_content_loaded_after_commit(page, &mut lifecycle_events, committed.frame_id())
+        .await
+        .with_context(|| error_context.to_string())?;
+
+    let final_url = page
+        .url()
+        .await?
+        .unwrap_or_else(|| committed.url().to_string());
+    if final_url.is_empty() {
+        Ok(fallback_url.unwrap_or_default().to_string())
+    } else {
+        Ok(final_url)
+    }
+}
+
+async fn wait_for_navigation_commit(
+    page: &Page,
+    frame_navigated_events: &mut EventStream<EventFrameNavigated>,
+    same_document_events: &mut EventStream<EventNavigatedWithinDocument>,
+) -> Result<NavigationCommit> {
+    let timeout = sleep(browser_request_timeout());
+    tokio::pin!(timeout);
+
+    loop {
+        tokio::select! {
+            _ = &mut timeout => bail!("Request timed out."),
+            event = frame_navigated_events.next() => {
+                let Some(event) = event else {
+                    bail!("frame navigation listener closed unexpectedly");
+                };
+                if event.frame.parent_id.is_none() {
+                    return Ok(NavigationCommit::NewDocument {
+                        frame_id: event.frame.id.clone(),
+                        url: event.frame.url.clone(),
+                    });
+                }
+            }
+            event = same_document_events.next() => {
+                let Some(event) = event else {
+                    bail!("same-document navigation listener closed unexpectedly");
+                };
+                if event_targets_main_frame(page, &event.frame_id).await {
+                    return Ok(NavigationCommit::SameDocument {
+                        frame_id: event.frame_id.clone(),
+                        url: event.url.clone(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+async fn wait_for_dom_content_loaded_after_commit(
+    page: &Page,
+    lifecycle_events: &mut EventStream<EventLifecycleEvent>,
+    frame_id: &FrameId,
+) -> Result<()> {
+    let timeout = sleep(browser_request_timeout());
+    tokio::pin!(timeout);
+
+    loop {
+        if main_frame_ready_state_is_interactive(page).await? {
+            return Ok(());
+        }
+
+        let poll_delay = sleep(Duration::from_millis(50));
+        tokio::pin!(poll_delay);
+
+        tokio::select! {
+            _ = &mut timeout => bail!("Request timed out."),
+            _ = &mut poll_delay => {}
+            event = lifecycle_events.next() => {
+                let Some(event) = event else {
+                    bail!("navigation lifecycle listener closed unexpectedly");
+                };
+                if event.frame_id == *frame_id && event.name == "DOMContentLoaded" {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+async fn event_targets_main_frame(page: &Page, frame_id: &FrameId) -> bool {
+    match page.frame_parent(frame_id.clone()).await {
+        Ok(parent_frame) => parent_frame.is_none(),
+        Err(_) => false,
+    }
+}
+
+async fn main_frame_ready_state_is_interactive(page: &Page) -> Result<bool> {
+    match page.evaluate("document.readyState").await {
+        Ok(state) => {
+            let ready_state: String = state.into_value().unwrap_or_default();
+            Ok(matches!(ready_state.as_str(), "interactive" | "complete"))
+        }
+        Err(err) if is_navigation_context_interrupted(&err) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+enum NavigationCommit {
+    NewDocument { frame_id: FrameId, url: String },
+    SameDocument { frame_id: FrameId, url: String },
+}
+
+impl NavigationCommit {
+    fn frame_id(&self) -> &FrameId {
+        match self {
+            NavigationCommit::NewDocument { frame_id, .. } => frame_id,
+            NavigationCommit::SameDocument { frame_id, .. } => frame_id,
+        }
+    }
+
+    fn url(&self) -> &str {
+        match self {
+            NavigationCommit::NewDocument { url, .. } => url.as_str(),
+            NavigationCommit::SameDocument { url, .. } => url.as_str(),
+        }
+    }
+}
+
+fn is_navigation_context_interrupted(err: &impl std::fmt::Display) -> bool {
+    let message = err.to_string();
+    message.contains("Execution context was destroyed")
+        || message.contains("Cannot find context with specified id")
+        || message.contains("Frame does not yet have a main execution context")
+        || message.contains("Frame does not yet have the execution context")
 }
 
 async fn page_uses_browser_internal_url(page: &Page) -> Result<bool> {

@@ -25,12 +25,15 @@ use chromiumoxide::cdp::browser_protocol::{
         MouseButton, SynthesizeScrollGestureParams,
     },
     network::{CookieParam, DeleteCookiesParams},
-    page::{CaptureScreenshotFormat, GetLayoutMetricsParams, PrintToPdfParams},
+    page::{
+        CaptureScreenshotFormat, EventFrameNavigated, EventLifecycleEvent,
+        EventNavigatedWithinDocument, FrameId, GetLayoutMetricsParams, PrintToPdfParams,
+    },
     performance::GetMetricsParams,
-    target::TargetId,
 };
 use chromiumoxide::keys::get_key_definition;
 use chromiumoxide::layout::Point;
+use chromiumoxide::listeners::EventStream;
 use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::types::{ClickOptions, Command, Method, MethodId};
 use chromiumoxide::{Browser, BrowserConfig, Page};

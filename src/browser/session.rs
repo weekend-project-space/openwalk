@@ -722,7 +722,7 @@ impl BrowserActor {
 
         let browser = self.browser.as_ref().expect("browser should be available");
         let page = browser
-            .new_page(url.as_str())
+            .new_page("about:blank")
             .await
             .context("failed to create a fresh browser page")?;
         self.ensure_network_tracking_for_page(page.clone()).await?;
@@ -732,11 +732,14 @@ impl BrowserActor {
         self.active_page = Some(self.pages.len() - 1);
         page.bring_to_front().await.ok();
         self.persist_current_active_page().ok();
+        let final_url = super::page::navigate_page_to_url(&page, url.as_str()).await?;
 
         // page.goto(url.as_str())
         //     .await
         //     .with_context(|| format!("failed to open a new page for `{url}`"))?;
-        Ok(BrowserValue::String(page.get_title().await?.unwrap_or(url)))
+        Ok(BrowserValue::String(
+            page.get_title().await?.unwrap_or(final_url),
+        ))
     }
 
     async fn has_single_placeholder_page(&self) -> Result<bool> {
