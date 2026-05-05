@@ -25,7 +25,7 @@ pub enum Command {
     Run(ToolExecArgs),
     /// Execute a built-in host function, local Scheme script file, or tool entry.
     Exec(ToolExecArgs),
-    /// Manage locally available tools.
+    /// Manage tools and inspect their usage and metadata.
     Tool {
         #[command(subcommand)]
         command: ToolCommand,
@@ -95,15 +95,15 @@ pub enum ToolCommand {
         /// Tool package name, for example browser-tools
         package: String,
     },
-    /// List built-in host functions and installed tools.
+    /// List runnable built-in, workspace, and global tools.
     List {
-        /// Output format: yaml (default), md, or json.
+        /// Output format: yaml (default compact list), md, or json.
         #[arg(short = 'f', long = "format", default_value = "yaml")]
         format: String,
     },
-    /// Show metadata for a built-in host function or local Scheme tool script.
+    /// Show usage and metadata for a built-in tool, installed tool, or local Scheme script.
     Info {
-        /// Workspace tool name or local .scm file path.
+        /// Built-in tool name, tool ref, or local .scm file path.
         tool: String,
         /// Output format: yaml (default), md, or json.
         #[arg(short = 'f', long = "format", default_value = "yaml")]
