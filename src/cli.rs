@@ -6,7 +6,8 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "openwalk",
     version,
-    about = "Local-first Scheme runtime CLI",
+    about = "Local-first tool runner with built-in browser automation",
+    after_help = "Examples:\n  openwalk tool list\n  openwalk tool info browser-open\n  openwalk exec browser-open https://example.com -s=demo\n\n",
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -17,15 +18,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Initialize an openwalk workspace in the current directory.
+    /// Initialize the current project
     Init(InitArgs),
-    /// Install project tools into the current workspace.
+    /// Install tools declared in openwalk.json
     Install(ProjectInstallArgs),
-    /// Run a workspace tool name or local Scheme script file. Built-in host functions use `exec`.
+    ///  Run a workspace tool or local Scheme script
     Run(ToolExecArgs),
-    /// Execute a built-in host function, local Scheme script file, or tool entry.
+    /// Execute a built-in tool, script, or installed tool
     Exec(ToolExecArgs),
-    /// Manage tools and inspect their usage and metadata.
+    ///  List, inspect, add, install, and remove tools
     Tool {
         #[command(subcommand)]
         command: ToolCommand,
