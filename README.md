@@ -38,6 +38,7 @@ cargo run -- exec browser-close -s=demo
 - `exec` 可以运行内建 host function、本地 `.scm`、工作区 tool、全局 tool
 - `exec` 未命中时，会尝试从 hub 拉取工具到当前项目后再执行
 - 输出格式支持 `yaml`、`md`、`json`
+- `tool list` 默认输出紧凑工具列表，`tool info` 默认输出可读说明页
 - 浏览器状态默认持久化
 
 ## 核心命令
@@ -48,8 +49,8 @@ cargo run -- exec browser-close -s=demo
 | `install`        | `openwalk install`                   | 安装 `openwalk.json -> tools` 中声明的项目工具       |
 | `run`            | `openwalk run <tool-or-script>`      | 运行工作区 tool 或本地 `.scm` 文件                   |
 | `exec`           | `openwalk exec <tool-or-script>`     | 执行 host function、脚本、工作区 tool、全局 tool     |
-| `tool list`      | `openwalk tool list [--json]`        | 查看可用工具                                         |
-| `tool info`      | `openwalk tool info <tool> [--json]` | 查看工具元信息                                       |
+| `tool list`      | `openwalk tool list [-f <fmt>]`      | 查看可直接执行的工具列表                             |
+| `tool info`      | `openwalk tool info <tool> [-f <fmt>]` | 查看工具用法与元信息说明页                         |
 | `tool add`       | `openwalk tool add <package>`        | 安装工具到当前项目                                   |
 | `tool remove`    | `openwalk tool remove <package>`     | 从当前项目移除工具                                   |
 | `tool install`   | `openwalk tool install <package>`    | 全局安装工具                                         |
@@ -93,6 +94,27 @@ cargo run -- exec browser-open https://example.com -s=qa
 cargo run -- run ./demo.scm -- -f=json
 ```
 
+## Tool 列表与详情
+
+```bash
+# 默认输出紧凑列表
+cargo run -- tool list
+
+# 返回结构化对象数组
+cargo run -- tool list -f=json
+
+# 查看内建 tool 的说明页
+cargo run -- tool info browser-open
+
+# 查看工作区 tool 的说明页
+cargo run -- tool info hello-word
+```
+
+- `tool list` 默认会列出可直接执行的 builtin、workspace、global tools。
+- `tool list -f=json` 返回精简结构：`name`、`usage`、`description`、`source`。
+- `tool info` 默认会展示 `usage`、`args`、`options`、`returns`、`examples` 等信息。
+- `tool info` 支持 builtin 名称、已安装 tool ref，以及本地 `.scm` 脚本路径。
+
 ## 常用浏览器命令
 
 | 命令              | 用法                                   | 说明             |
@@ -106,10 +128,16 @@ cargo run -- run ./demo.scm -- -f=json
 | `tab-close`       | `openwalk exec tab-close [tab]`        | 关闭标签页       |
 | `browser-close`   | `openwalk exec browser-close`          | 关闭浏览器会话   |
 
-完整能力面请直接查看：
+快速浏览能力面：
 
 ```bash
-cargo run -- tool list --json
+cargo run -- tool list
+```
+
+结构化能力面：
+
+```bash
+cargo run -- tool list -f=json
 ```
 
 ## 浏览器会话
