@@ -1516,7 +1516,7 @@ mod tests {
         (sandbox, global_home)
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_executes_scheme_script() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -1541,7 +1541,7 @@ mod tests {
         result.expect("script should run");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_resolves_workspace_tool_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()
@@ -2168,7 +2168,7 @@ mod tests {
             .contains("missing a `#| @meta ... |#` header"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_auto_installs_unknown_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2216,7 +2216,7 @@ mod tests {
         assert!(workspace.tool_entry_path("remote.browser.open").exists());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2264,7 +2264,7 @@ mod tests {
         assert!(workspace.tool_entry_path("v2ex/hot").exists());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_executes_builtin_host_function() {
         let workspace_sandbox = TestDir::new();
         let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
@@ -2282,7 +2282,7 @@ mod tests {
         .expect("exec should run builtin host functions");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exec_tool_allows_global_packages_without_workspace_init() {
         let _env_guard = HUB_ENV_LOCK
             .lock()
@@ -2329,7 +2329,7 @@ mod tests {
         assert!(!workspace.is_initialized());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn run_local_rejects_builtin_host_function_names() {
         let _cwd_guard = CWD_LOCK
             .acquire()
