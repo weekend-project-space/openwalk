@@ -96,13 +96,13 @@ openwalk exec -close -s=demo
 
 ```bash
 # 工作区 tool
-cargo run -- run hello-word -- OpenWalk
+openwalk exec hello-word -- OpenWalk
 
 # 本地脚本
-cargo run -- run ./demo.scm -- foo bar
+openwalk run ./demo.scm -- foo bar
 
 # 内建浏览器命令
-cargo run -- exec browser-open https://example.com
+openwalk exec browser-open https://example.com
 ```
 
 注意：`browser-open` 这类内建命令不能用 `run`。
@@ -118,25 +118,25 @@ cargo run -- exec browser-open https://example.com
 例子：
 
 ```bash
-cargo run -- run hello-word -f=json -- OpenWalk
-cargo run -- exec browser-open https://example.com -s=qa
-cargo run -- run ./demo.scm -- -f=json
+openwalk exec hello-word -f=json -- OpenWalk
+openwalk exec browser-open https://example.com -s=qa
+openwalk exec ./demo.scm -- -f=json
 ```
 
 ## Tool 列表与详情
 
 ```bash
 # 默认输出紧凑列表
-cargo run -- tool list
+openwalk tool list
 
 # 返回结构化对象数组
-cargo run -- tool list -f=json
+openwalk tool list -f=json
 
 # 查看内建 tool 的说明页
-cargo run -- tool info browser-open
+openwalk tool info browser-open
 
 # 查看工作区 tool 的说明页
-cargo run -- tool info hello-word
+openwalk tool info hello-word
 ```
 
 - `tool list` 默认会列出可直接执行的 builtin、workspace、global tools。
@@ -160,13 +160,13 @@ cargo run -- tool info hello-word
 快速浏览能力面：
 
 ```bash
-cargo run -- tool list
+openwalk tool list
 ```
 
 结构化能力面：
 
 ```bash
-cargo run -- tool list -f=json
+openwalk tool list -f=json
 ```
 
 ## 浏览器会话
@@ -178,17 +178,17 @@ cargo run -- tool list -f=json
 推荐顺序：
 
 ```bash
-cargo run -- exec browser-open https://example.com -s=qa
-cargo run -- exec tab-list -s=qa
-cargo run -- exec browser-close -s=qa
+openwalk exec browser-open https://example.com -s=qa
+openwalk exec tab-list -s=qa
+openwalk exec browser-close -s=qa
 ```
 
 `browser-open` 额外支持：
 
 ```bash
-cargo run -- exec browser-open https://example.com --headed
-cargo run -- exec browser-open https://example.com --new-tab -s=qa
-cargo run -- exec browser-open https://example.com --profile /tmp/openwalk-profile
+openwalk exec browser-open https://example.com --headed
+openwalk exec browser-open https://example.com --new-tab -s=qa
+openwalk exec browser-open https://example.com --profile /tmp/openwalk-profile
 ```
 
 ## 工作区与全局目录
@@ -230,7 +230,7 @@ OpenWalk 通过 `scheme4r` 执行脚本，并注入：
 本地运行：
 
 ```bash
-cargo run -- run ./demo.scm -- OpenWalk
+openwalk run ./demo.scm -- OpenWalk
 ```
 
 工作区 tool 路径：
