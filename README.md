@@ -12,12 +12,13 @@ openwalk <command>
 
 ```bash
 # Linux
-curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.sh | bash -s -- --version v0.1.0
 ```
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 -OutFile install.ps1
+  powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.0.1
 ```
 
 脚本默认会：
@@ -25,6 +26,11 @@ irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/script
 - 下载 GitHub Releases 中当前平台对应的 `openwalk` 二进制
 - 安装到 `~/.openwalk/bin` 或 `%USERPROFILE%\.openwalk\bin`
 - 尝试把该目录加入当前用户的 `PATH`
+
+注意：
+
+- 安装脚本依赖已发布的 GitHub Release 资产
+- 如果看到 `releases/latest/download/... 404`，通常说明仓库还没有发布 release，或者缺少对应平台文件
 
 常用参数：
 

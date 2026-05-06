@@ -26,6 +26,48 @@ function Fail {
     throw "[openwalk-install] error: $Message"
 }
 
+function Download-File {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [string[]]$ExpectedAssets = @()
+    )
+
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile
+        return
+    } catch {
+        $statusCode = $null
+
+        try {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+        } catch {
+        }
+
+        if ($statusCode -eq 404) {
+            $hintLines = @(
+                "[openwalk-install] error: no published release asset was found for:",
+                "[openwalk-install] error:   $Url",
+                "[openwalk-install] hint: publish a GitHub Release first"
+            )
+
+            if ($ExpectedAssets.Count -gt 0) {
+                $hintLines += "[openwalk-install] hint: expected assets:"
+                foreach ($asset in $ExpectedAssets) {
+                    $hintLines += "[openwalk-install] hint:   $asset"
+                }
+            }
+
+            $hintLines += "[openwalk-install] hint: or build locally with: cargo build --release"
+            throw ($hintLines -join [Environment]::NewLine)
+        }
+
+        Fail "failed to download $Url. $($_.Exception.Message)"
+    }
+}
+
 function Get-ReleasePath {
     param([string]$RequestedVersion)
 
@@ -142,10 +184,10 @@ try {
     $checksumPath = Join-Path $tempRoot $checksumName
 
     Write-Log "downloading $assetUrl"
-    Invoke-WebRequest -Uri $assetUrl -OutFile $archivePath
+    Download-File -Url $assetUrl -OutFile $archivePath -ExpectedAssets @($assetName, $checksumName)
 
     Write-Log "downloading $checksumUrl"
-    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath
+    Download-File -Url $checksumUrl -OutFile $checksumPath -ExpectedAssets @($assetName, $checksumName)
 
     $expectedChecksum = $null
     foreach ($line in Get-Content -Path $checksumPath) {

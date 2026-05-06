@@ -8,6 +8,7 @@ VERSION="${OPENWALK_VERSION:-latest}"
 INSTALL_DIR="${OPENWALK_INSTALL_DIR:-$HOME/.openwalk/bin}"
 BASE_URL="${OPENWALK_RELEASE_BASE_URL:-$DEFAULT_BASE_URL}"
 NO_PATH=0
+DOWNLOAD_LAST_ERROR=''
 
 usage() {
   cat <<'EOF'
@@ -46,18 +47,66 @@ need_cmd() {
 download() {
   local url="$1"
   local output="$2"
+  local err_file
+  err_file="$(mktemp)"
+  DOWNLOAD_LAST_ERROR=''
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$output"
-    return
+    if curl -fsSL "$url" -o "$output" 2>"$err_file"; then
+      rm -f "$err_file"
+      return 0
+    fi
+    DOWNLOAD_LAST_ERROR="$(cat "$err_file" 2>/dev/null || true)"
+    rm -f "$err_file"
+    return 1
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO "$output" "$url"
-    return
+    if wget -qO "$output" "$url" 2>"$err_file"; then
+      rm -f "$err_file"
+      return 0
+    fi
+    DOWNLOAD_LAST_ERROR="$(cat "$err_file" 2>/dev/null || true)"
+    rm -f "$err_file"
+    return 1
   fi
 
+  rm -f "$err_file"
   fail "either curl or wget is required"
+}
+
+download_error_is_404() {
+  case "$DOWNLOAD_LAST_ERROR" in
+    *"error: 404"*|*"error 404"*|*"404 Not Found"*|*"The requested URL returned error: 404"*|*"ERROR 404:"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+fail_download() {
+  local url="$1"
+
+  if download_error_is_404; then
+    cat >&2 <<EOF
+[openwalk-install] error: no published release asset was found for:
+[openwalk-install] error:   $url
+[openwalk-install] hint: publish a GitHub Release first and upload:
+[openwalk-install] hint:   $ASSET_NAME
+[openwalk-install] hint:   $CHECKSUM_NAME
+[openwalk-install] hint: or build locally with:
+[openwalk-install] hint:   cargo build --release
+EOF
+    exit 1
+  fi
+
+  if [ -n "$DOWNLOAD_LAST_ERROR" ]; then
+    fail "failed to download $url: $DOWNLOAD_LAST_ERROR"
+  fi
+
+  fail "failed to download $url"
 }
 
 checksum_sha256() {
@@ -203,10 +252,10 @@ cleanup() {
 trap cleanup EXIT
 
 log "downloading $ASSET_URL"
-download "$ASSET_URL" "$ARCHIVE_PATH"
+download "$ASSET_URL" "$ARCHIVE_PATH" || fail_download "$ASSET_URL"
 
 log "downloading $CHECKSUM_URL"
-download "$CHECKSUM_URL" "$CHECKSUM_PATH"
+download "$CHECKSUM_URL" "$CHECKSUM_PATH" || fail_download "$CHECKSUM_URL"
 
 EXPECTED_SUM=''
 while read -r sum file; do
