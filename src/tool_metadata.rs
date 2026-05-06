@@ -52,7 +52,7 @@ pub fn load_tool_metadata(script_path: &Path) -> Result<ToolMetadata> {
     })
 }
 
-fn parse_tool_metadata(source: &str) -> Result<Option<ToolMetadata>> {
+pub fn parse_tool_metadata(source: &str) -> Result<Option<ToolMetadata>> {
     let trimmed = source.trim_start_matches('\u{feff}').trim_start();
     if !trimmed.starts_with("#|") {
         return Ok(None);

@@ -17,7 +17,7 @@ use crate::{
     },
     extlib::LIB,
     output::{format_execution_result, parse_output_format, OutputFormat},
-    tool_metadata::{ToolArgument, ToolMetadata, ToolReturn},
+    tool_metadata::{parse_tool_metadata, ToolArgument, ToolMetadata, ToolReturn},
 };
 
 thread_local! {
@@ -194,7 +194,13 @@ fn execute_builtin_sync(
 
     let env = Environment::standard();
     let pseudo_path = PathBuf::from(format!("<builtin:{name}>"));
-    install_openwalk_bindings(env.clone(), &pseudo_path, &args, session_name.as_deref());
+    install_openwalk_bindings(
+        env.clone(),
+        &pseudo_path,
+        &args,
+        session_name.as_deref(),
+        None,
+    );
 
     let builtin = lookup_builtin_function(env.clone(), &name)?;
     let cli_args = cli_args_to_scheme_values(&name, &args)?;
@@ -598,7 +604,14 @@ fn execute_script_sync(
     session_name: Option<String>,
 ) -> Result<Value> {
     let env = Environment::standard();
-    install_openwalk_bindings(env.clone(), &script_path, &args, session_name.as_deref());
+    let script_meta = parse_tool_metadata(&source)?;
+    install_openwalk_bindings(
+        env.clone(),
+        &script_path,
+        &args,
+        session_name.as_deref(),
+        script_meta.as_ref(),
+    );
     let scheme = Scheme::with_env(env);
 
     let _guard = install_host_context(HostContext { browser });
@@ -653,6 +666,7 @@ fn install_openwalk_bindings(
     script_path: &Path,
     args: &[String],
     session_name: Option<&str>,
+    script_meta: Option<&ToolMetadata>,
 ) {
     let mut env_ref = env.borrow_mut();
 
@@ -668,6 +682,13 @@ fn install_openwalk_bindings(
         "openwalk-session-name",
         match session_name {
             Some(name) => Value::string(name),
+            None => Value::Boolean(false),
+        },
+    );
+    env_ref.define(
+        "openwalk-script-meta",
+        match script_meta {
+            Some(meta) => tool_metadata_to_scheme(meta),
             None => Value::Boolean(false),
         },
     );
@@ -1405,6 +1426,33 @@ fn browser_value_to_scheme(value: BrowserValue) -> Value {
     }
 }
 
+fn tool_metadata_to_scheme(metadata: &ToolMetadata) -> Value {
+    let json = serde_json::to_value(metadata)
+        .expect("ToolMetadata should always serialize into JSON successfully");
+    json_to_scheme_value(json)
+}
+
+fn json_to_scheme_value(value: serde_json::Value) -> Value {
+    match value {
+        serde_json::Value::Null => Value::Unspecified,
+        serde_json::Value::Bool(value) => Value::Boolean(value),
+        serde_json::Value::Number(value) => value
+            .as_i64()
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::string(value.to_string())),
+        serde_json::Value::String(value) => Value::string(value),
+        serde_json::Value::Array(values) => {
+            Value::list(values.into_iter().map(json_to_scheme_value).collect())
+        }
+        serde_json::Value::Object(values) => Value::list(
+            values
+                .into_iter()
+                .map(|(key, value)| Value::pair(Value::string(key), json_to_scheme_value(value)))
+                .collect(),
+        ),
+    }
+}
+
 pub fn scheme_value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Boolean(value) => serde_json::Value::Bool(*value),
@@ -1977,6 +2025,70 @@ mod tests {
 
         let Value::Boolean(value) = result else {
             panic!("openwalk-session-name should be #f without a named session");
+        };
+        assert!(!value);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_script_exposes_openwalk_script_meta_as_alist() {
+        let sandbox = TestDir::new();
+        let script_path = sandbox.path.join("script-meta.scm");
+        fs::write(
+            &script_path,
+            r#"
+            #| @meta
+            {
+              "name": "demo-tool",
+              "description": "demo description",
+              "args": [],
+              "returns": {
+                "type": "string",
+                "description": "demo return"
+              },
+              "examples": ["openwalk run demo-tool"],
+              "domains": [],
+              "readOnly": true,
+              "requiresLogin": false,
+              "tags": ["demo"]
+            }
+            |#
+
+            (define (main args)
+              (cdr (assoc "name" openwalk-script-meta)))
+            "#,
+        )
+        .expect("script should be written");
+
+        let browser = crate::browser::BrowserService::spawn();
+        let result = execute_script(&script_path, &[], browser.client(), None)
+            .await
+            .expect("script should expose script metadata");
+        browser
+            .shutdown()
+            .await
+            .expect("browser service should stop");
+
+        assert_eq!(expect_test_string(&result), "demo-tool");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_script_exposes_false_when_script_meta_is_missing() {
+        let sandbox = TestDir::new();
+        let script_path = sandbox.path.join("script-meta-missing.scm");
+        fs::write(&script_path, "(define (main args) openwalk-script-meta)")
+            .expect("script should be written");
+
+        let browser = crate::browser::BrowserService::spawn();
+        let result = execute_script(&script_path, &[], browser.client(), None)
+            .await
+            .expect("script should expose a falsey metadata value");
+        browser
+            .shutdown()
+            .await
+            .expect("browser service should stop");
+
+        let Value::Boolean(value) = result else {
+            panic!("openwalk-script-meta should be #f without a meta header");
         };
         assert!(!value);
     }

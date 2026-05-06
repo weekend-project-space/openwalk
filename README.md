@@ -202,6 +202,8 @@ OpenWalk 通过 `scheme4r` 执行脚本，并注入：
 
 - `openwalk-args`
 - `openwalk-script-path`
+- `openwalk-script-meta`
+- `openwalk-session-name`
 
 推荐脚本形状：
 
