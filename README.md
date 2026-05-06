@@ -1,6 +1,6 @@
 # OpenWalk
 
-OpenWalk 是一个 local-first 的 Scheme runtime CLI，用来执行本地 Scheme tool，并提供浏览器自动化 host function。
+OpenWalk 是一个AI 友好, Local-first 的 RPA runtime CLI，并提供浏览器自动化常用function。
 
 ```bash
 openwalk <command>
