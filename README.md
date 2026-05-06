@@ -26,11 +26,6 @@ irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/script
 - 安装到 `~/.openwalk/bin` 或 `%USERPROFILE%\.openwalk\bin`
 - 尝试把该目录加入当前用户的 `PATH`
 
-注意：
-
-- 安装脚本依赖已发布的 GitHub Release 资产
-- 如果看到 `releases/latest/download/... 404`，通常说明仓库还没有发布 release，或者缺少对应平台文件
-
 常用参数：
 
 ```bash
@@ -60,6 +55,8 @@ openwalk exec browser-open https://example.com -s=demo
 openwalk exec tab-list -s=demo
 openwalk exec -close -s=demo
 ```
+
+更多常用功能 [openwalkhub](https://github.com/weekend-project-space/openwalkhub)
 
 ## 核心规则
 
@@ -138,11 +135,6 @@ openwalk tool info browser-open
 # 查看工作区 tool 的说明页
 openwalk tool info hello-word
 ```
-
-- `tool list` 默认会列出可直接执行的 builtin、workspace、global tools。
-- `tool list -f=json` 返回精简结构：`name`、`usage`、`description`、`source`。
-- `tool info` 默认会展示 `usage`、`args`、`options`、`returns`、`examples` 等信息。
-- `tool info` 支持 builtin 名称、已安装 tool ref，以及本地 `.scm` 脚本路径。
 
 ## 常用浏览器命令
 
