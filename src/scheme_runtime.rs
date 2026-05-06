@@ -154,31 +154,46 @@ pub async fn execute_script(
     script_path: &Path,
     args: &[String],
     browser: BrowserClient,
+    session_name: Option<String>,
 ) -> Result<Value> {
     let source = tokio::fs::read_to_string(script_path)
         .await
         .with_context(|| format!("failed to read script {}", script_path.display()))?;
     let script_path = script_path.to_path_buf();
     let args = args.to_vec();
+    let session_name = session_name;
 
-    tokio::task::block_in_place(|| execute_script_sync(script_path, source, args, browser))
+    tokio::task::block_in_place(|| {
+        execute_script_sync(script_path, source, args, browser, session_name)
+    })
 }
 
-pub async fn execute_builtin(name: &str, args: &[String], browser: BrowserClient) -> Result<Value> {
+pub async fn execute_builtin(
+    name: &str,
+    args: &[String],
+    browser: BrowserClient,
+    session_name: Option<String>,
+) -> Result<Value> {
     let name = name.to_string();
     let args = args.to_vec();
+    let session_name = session_name;
 
-    tokio::task::block_in_place(|| execute_builtin_sync(name, args, browser))
+    tokio::task::block_in_place(|| execute_builtin_sync(name, args, browser, session_name))
 }
 
-fn execute_builtin_sync(name: String, args: Vec<String>, browser: BrowserClient) -> Result<Value> {
+fn execute_builtin_sync(
+    name: String,
+    args: Vec<String>,
+    browser: BrowserClient,
+    session_name: Option<String>,
+) -> Result<Value> {
     if !SCHEME_BUILTINS.contains(&name.as_str()) {
         bail!("unknown builtin host function `{name}`");
     }
 
     let env = Environment::standard();
     let pseudo_path = PathBuf::from(format!("<builtin:{name}>"));
-    install_openwalk_bindings(env.clone(), &pseudo_path, &args);
+    install_openwalk_bindings(env.clone(), &pseudo_path, &args, session_name.as_deref());
 
     let builtin = lookup_builtin_function(env.clone(), &name)?;
     let cli_args = cli_args_to_scheme_values(&name, &args)?;
@@ -579,9 +594,10 @@ fn execute_script_sync(
     source: String,
     args: Vec<String>,
     browser: BrowserClient,
+    session_name: Option<String>,
 ) -> Result<Value> {
     let env = Environment::standard();
-    install_openwalk_bindings(env.clone(), &script_path, &args);
+    install_openwalk_bindings(env.clone(), &script_path, &args, session_name.as_deref());
     let scheme = Scheme::with_env(env);
 
     let _guard = install_host_context(HostContext { browser });
@@ -631,7 +647,12 @@ fn output_format(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
     Ok(Value::String(SchemeString::new(output)))
 }
 
-fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
+fn install_openwalk_bindings(
+    env: EnvRef,
+    script_path: &Path,
+    args: &[String],
+    session_name: Option<&str>,
+) {
     let mut env_ref = env.borrow_mut();
 
     env_ref.define(
@@ -641,6 +662,13 @@ fn install_openwalk_bindings(env: EnvRef, script_path: &Path, args: &[String]) {
     env_ref.define(
         "openwalk-args",
         Value::list(args.iter().cloned().map(Value::string).collect()),
+    );
+    env_ref.define(
+        "openwalk-session-name",
+        match session_name {
+            Some(name) => Value::string(name),
+            None => Value::Boolean(false),
+        },
     );
     // env_ref.define("display-format", Value(()));
     env_ref.define(
@@ -1558,7 +1586,7 @@ mod tests {
             .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[], browser.client())
+        let result = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect("script should execute");
         browser
@@ -1577,7 +1605,12 @@ mod tests {
             .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[String::from("hello")], browser.client())
+        let result = execute_script(
+            &script_path,
+            &[String::from("hello")],
+            browser.client(),
+            None,
+        )
             .await
             .expect("script should execute");
         browser
@@ -1599,7 +1632,12 @@ mod tests {
         .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[String::from("from-cli")], browser.client())
+        let result = execute_script(
+            &script_path,
+            &[String::from("from-cli")],
+            browser.client(),
+            None,
+        )
             .await
             .expect("script should execute");
         browser
@@ -1617,7 +1655,7 @@ mod tests {
         fs::write(&script_path, "(+ 40 2)").expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[], browser.client())
+        let result = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect("script should execute");
         browser
@@ -1639,7 +1677,7 @@ mod tests {
         .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[], browser.client())
+        let result = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect("script should execute");
         browser
@@ -1658,7 +1696,7 @@ mod tests {
             .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let error = execute_script(&script_path, &[], browser.client())
+        let error = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect_err("legacy names should no longer be registered");
         browser
@@ -1679,7 +1717,7 @@ mod tests {
             .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let error = execute_script(&script_path, &[], browser.client())
+        let error = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect_err("legacy tab names should no longer be registered");
         browser
@@ -1700,7 +1738,7 @@ mod tests {
             .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let error = execute_script(&script_path, &[], browser.client())
+        let error = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect_err("old scheme names should no longer be registered");
         browser
@@ -1841,7 +1879,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_builtin_supports_cli_number_arguments() {
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_builtin("time-sleep", &[String::from("0")], browser.client())
+        let result = execute_builtin("time-sleep", &[String::from("0")], browser.client(), None)
             .await
             .expect("builtin should execute");
         browser
@@ -1855,7 +1893,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_builtin_tab_new_requires_browser_open_first() {
         let browser = crate::browser::BrowserService::spawn();
-        let error = execute_builtin("tab-new", &[], browser.client())
+        let error = execute_builtin("tab-new", &[], browser.client(), None)
             .await
             .expect_err("tab-new should require browser-open first");
         browser
@@ -1888,7 +1926,7 @@ mod tests {
         .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(&script_path, &[], browser.client())
+        let result = execute_script(&script_path, &[], browser.client(), None)
             .await
             .expect("script should catch host tool failure");
         browser
@@ -1899,6 +1937,58 @@ mod tests {
         let message = expect_test_string(&result);
         assert!(message.contains("tab-new"));
         assert!(message.contains("browser-open"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_script_exposes_openwalk_session_name() {
+        let sandbox = TestDir::new();
+        let script_path = sandbox.path.join("session-name.scm");
+        fs::write(
+            &script_path,
+            "(define (main args) openwalk-session-name)",
+        )
+        .expect("script should be written");
+
+        let browser = crate::browser::BrowserService::spawn();
+        let result = execute_script(
+            &script_path,
+            &[],
+            browser.client(),
+            Some("qa".to_string()),
+        )
+        .await
+        .expect("script should expose session name");
+        browser
+            .shutdown()
+            .await
+            .expect("browser service should stop");
+
+        assert_eq!(expect_test_string(&result), "qa");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_script_exposes_false_when_session_name_is_missing() {
+        let sandbox = TestDir::new();
+        let script_path = sandbox.path.join("session-name-missing.scm");
+        fs::write(
+            &script_path,
+            "(define (main args) openwalk-session-name)",
+        )
+        .expect("script should be written");
+
+        let browser = crate::browser::BrowserService::spawn();
+        let result = execute_script(&script_path, &[], browser.client(), None)
+            .await
+            .expect("script should expose a falsey session value");
+        browser
+            .shutdown()
+            .await
+            .expect("browser service should stop");
+
+        let Value::Boolean(value) = result else {
+            panic!("openwalk-session-name should be #f without a named session");
+        };
+        assert!(!value);
     }
 
     #[test]

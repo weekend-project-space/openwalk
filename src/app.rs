@@ -605,9 +605,13 @@ async fn run_scheme_script(
     let parsed_args: RuntimeInvocationArgs = extract_common_runtime_args(args)?;
     let launch_options = BrowserLaunchOptions::with_session(parsed_args.session.clone());
     let browser = create_browser_service(global_home, launch_options).await?;
-    let result =
-        scheme_runtime::execute_script(script_path, &parsed_args.runtime_args, browser.client())
-            .await;
+    let result = scheme_runtime::execute_script(
+        script_path,
+        &parsed_args.runtime_args,
+        browser.client(),
+        parsed_args.session.clone(),
+    )
+    .await;
     let output_payload = result.map(|result| {
         json!({
             // "mode": mode,
@@ -656,7 +660,13 @@ async fn run_builtin_tool(
         parsed_args.runtime_args.clone()
     };
     let browser = create_browser_service(global_home, launch_options).await?;
-    let result = scheme_runtime::execute_builtin(tool, &runtime_args, browser.client()).await;
+    let result = scheme_runtime::execute_builtin(
+        tool,
+        &runtime_args,
+        browser.client(),
+        parsed_args.session.clone(),
+    )
+    .await;
     let output_payload = result.map(|result| {
         json!({
             // "mode": mode,
