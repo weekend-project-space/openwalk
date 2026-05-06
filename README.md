@@ -2,34 +2,58 @@
 
 OpenWalk 是一个 local-first 的 Scheme runtime CLI，用来执行本地 Scheme tool，并提供浏览器自动化 host function。
 
-默认示例使用：
-
-```bash
-cargo run -- <command>
-```
-
-如果你已经安装了二进制，也可以直接用：
-
 ```bash
 openwalk <command>
+```
+
+## 安装
+
+推荐直接安装 release 二进制：
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 | iex
+```
+
+脚本默认会：
+
+- 下载 GitHub Releases 中当前平台对应的 `openwalk` 二进制
+- 安装到 `~/.openwalk/bin` 或 `%USERPROFILE%\.openwalk\bin`
+- 尝试把该目录加入当前用户的 `PATH`
+
+常用参数：
+
+```bash
+bash scripts/install.sh --version v0.1.0
+bash scripts/install.sh --install-dir /usr/local/bin --no-path
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Version v0.1.0
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -InstallDir C:\tools\openwalk -NoPath
 ```
 
 ## 快速开始
 
 ```bash
 # 初始化当前项目
-cargo run -- init
+openwalk init
 
 # 查看可用工具
-cargo run -- tool list
+openwalk  tool list
 
 # 运行一个工作区 tool
-cargo run -- run hello-word -- OpenWalk
+openwalk exec hello-word OpenWalk
 
 # 打开浏览器并使用命名会话
-cargo run -- exec browser-open https://example.com -s=demo
-cargo run -- exec tab-list -s=demo
-cargo run -- exec browser-close -s=demo
+openwalk exec browser-open https://example.com -s=demo
+openwalk exec tab-list -s=demo
+openwalk exec -close -s=demo
 ```
 
 ## 核心规则
@@ -43,18 +67,18 @@ cargo run -- exec browser-close -s=demo
 
 ## 核心命令
 
-| 命令             | 用法                                 | 说明                                                 |
-| ---------------- | ------------------------------------ | ---------------------------------------------------- |
-| `init`           | `openwalk init`                      | 初始化当前项目，创建 `openwalk.json` 和 `.openwalk/` |
-| `install`        | `openwalk install`                   | 安装 `openwalk.json -> tools` 中声明的项目工具       |
-| `run`            | `openwalk run <tool-or-script>`      | 运行工作区 tool 或本地 `.scm` 文件                   |
-| `exec`           | `openwalk exec <tool-or-script>`     | 执行 host function、脚本、工作区 tool、全局 tool     |
-| `tool list`      | `openwalk tool list [-f <fmt>]`      | 查看可直接执行的工具列表                             |
-| `tool info`      | `openwalk tool info <tool> [-f <fmt>]` | 查看工具用法与元信息说明页                         |
-| `tool add`       | `openwalk tool add <package>`        | 安装工具到当前项目                                   |
-| `tool remove`    | `openwalk tool remove <package>`     | 从当前项目移除工具                                   |
-| `tool install`   | `openwalk tool install <package>`    | 全局安装工具                                         |
-| `tool uninstall` | `openwalk tool uninstall <package>`  | 全局卸载工具                                         |
+| 命令             | 用法                                   | 说明                                                 |
+| ---------------- | -------------------------------------- | ---------------------------------------------------- |
+| `init`           | `openwalk init`                        | 初始化当前项目，创建 `openwalk.json` 和 `.openwalk/` |
+| `install`        | `openwalk install`                     | 安装 `openwalk.json -> tools` 中声明的项目工具       |
+| `run`            | `openwalk run <tool-or-script>`        | 运行工作区 tool 或本地 `.scm` 文件                   |
+| `exec`           | `openwalk exec <tool-or-script>`       | 执行 host function、脚本、工作区 tool、全局 tool     |
+| `tool list`      | `openwalk tool list [-f <fmt>]`        | 查看可直接执行的工具列表                             |
+| `tool info`      | `openwalk tool info <tool> [-f <fmt>]` | 查看工具用法与元信息说明页                           |
+| `tool add`       | `openwalk tool add <package>`          | 安装工具到当前项目                                   |
+| `tool remove`    | `openwalk tool remove <package>`       | 从当前项目移除工具                                   |
+| `tool install`   | `openwalk tool install <package>`      | 全局安装工具                                         |
+| `tool uninstall` | `openwalk tool uninstall <package>`    | 全局卸载工具                                         |
 
 ## `run` 与 `exec`
 
