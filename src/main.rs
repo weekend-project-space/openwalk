@@ -1,6 +1,7 @@
 mod app;
 mod browser;
 mod cli;
+mod extlib;
 mod output;
 mod scheme_runtime;
 mod tool_hub;

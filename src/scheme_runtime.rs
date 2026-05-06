@@ -15,6 +15,7 @@ use crate::{
     browser::{
         list_browser_sessions, parse_mouse_button, BrowserClient, BrowserCommand, BrowserValue,
     },
+    extlib::LIB,
     output::{format_execution_result, parse_output_format, OutputFormat},
     tool_metadata::{ToolArgument, ToolMetadata, ToolReturn},
 };
@@ -601,7 +602,7 @@ fn execute_script_sync(
     let scheme = Scheme::with_env(env);
 
     let _guard = install_host_context(HostContext { browser });
-    let loaded_value = scheme.eval(&source).map_err(|err| {
+    let loaded_value = scheme.eval(&format!("{} {}", LIB, source)).map_err(|err| {
         scheme_error_to_anyhow("scheme execution failed while loading script", err)
     })?;
 
@@ -1611,8 +1612,8 @@ mod tests {
             browser.client(),
             None,
         )
-            .await
-            .expect("script should execute");
+        .await
+        .expect("script should execute");
         browser
             .shutdown()
             .await
@@ -1638,8 +1639,8 @@ mod tests {
             browser.client(),
             None,
         )
-            .await
-            .expect("script should execute");
+        .await
+        .expect("script should execute");
         browser
             .shutdown()
             .await
@@ -1943,21 +1944,13 @@ mod tests {
     async fn execute_script_exposes_openwalk_session_name() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("session-name.scm");
-        fs::write(
-            &script_path,
-            "(define (main args) openwalk-session-name)",
-        )
-        .expect("script should be written");
+        fs::write(&script_path, "(define (main args) openwalk-session-name)")
+            .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
-        let result = execute_script(
-            &script_path,
-            &[],
-            browser.client(),
-            Some("qa".to_string()),
-        )
-        .await
-        .expect("script should expose session name");
+        let result = execute_script(&script_path, &[], browser.client(), Some("qa".to_string()))
+            .await
+            .expect("script should expose session name");
         browser
             .shutdown()
             .await
@@ -1970,11 +1963,8 @@ mod tests {
     async fn execute_script_exposes_false_when_session_name_is_missing() {
         let sandbox = TestDir::new();
         let script_path = sandbox.path.join("session-name-missing.scm");
-        fs::write(
-            &script_path,
-            "(define (main args) openwalk-session-name)",
-        )
-        .expect("script should be written");
+        fs::write(&script_path, "(define (main args) openwalk-session-name)")
+            .expect("script should be written");
 
         let browser = crate::browser::BrowserService::spawn();
         let result = execute_script(&script_path, &[], browser.client(), None)
