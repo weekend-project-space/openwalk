@@ -12,13 +12,12 @@ openwalk <command>
 
 ```bash
 # Linux
-  curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.sh | bash -s -- --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.sh | bash
 ```
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 -OutFile install.ps1
-  powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.0.1
+irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 | iex
 ```
 
 脚本默认会：
