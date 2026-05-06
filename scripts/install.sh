@@ -127,7 +127,7 @@ checksum_sha256() {
 
 release_path() {
   if [ "$VERSION" = "latest" ]; then
-    printf 'latest/download'
+    printf 'download/latest'
   else
     printf 'download/%s' "$VERSION"
   fi

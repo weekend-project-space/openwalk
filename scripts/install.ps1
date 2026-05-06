@@ -72,7 +72,7 @@ function Get-ReleasePath {
     param([string]$RequestedVersion)
 
     if ($RequestedVersion -eq "latest") {
-        return "latest/download"
+        return "download/latest"
     }
 
     return "download/$RequestedVersion"
