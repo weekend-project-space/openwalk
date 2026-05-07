@@ -16,6 +16,7 @@ pub const LIB: &str = r#"
 ;;    "const resp = await fetch('https://www.v2ex.com/api/topics/latest.json');"
 ;;    "return await resp.json();")
 
+
 (define-syntax def
   (syntax-rules ()
     ((_ name value)
@@ -477,6 +478,12 @@ pub const LIB: &str = r#"
 
 (define-syntax js-call
   (syntax-rules ()
+    ((_  part )
+     (js-eval
+       (string-append
+         "(async () => {"
+         part 
+         "})()")))
     ((_ args part ...)
      (js-eval
        (string-append
@@ -484,12 +491,7 @@ pub const LIB: &str = r#"
          part ...
          "})("
          (args->js-object args)
-         ")")))
-    ((_ part ...)
-     (js-eval
-       (string-append
-         "(async () => {"
-         part ...
-         "})()")))))
+         ")")))))
+
 
 "#;
