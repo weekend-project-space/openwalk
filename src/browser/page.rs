@@ -322,181 +322,580 @@ fn matches_internal_browser_url(url: &str) -> bool {
 }
 
 const PAGE_SNAPSHOT_JS: &str = r#"() => {
+    const MAX_DEPTH = 30;
+    const MAX_CHILDREN = 300;
+    const MAX_NODES = 450;
+    const MAX_TEXT = 120;
+    const MAX_VALUE = 80;
+
+    let nextRef = 1;
+    let nodeCount = 0;
+    let activeRef = null;
+
+    const BADGE_TEXTS = new Set(["新", "热", "优", "沸", "荐"]);
+    const CONTROL_TAGS = new Set(["input", "select", "textarea", "button"]);
+    const SKIP_TAGS = new Set([
+      "script",
+      "style",
+      "noscript",
+      "template",
+      "meta",
+      "link",
+      "source",
+      "track"
+    ]);
+
+    const activeElement =
+      document.activeElement && document.activeElement.nodeType === Node.ELEMENT_NODE
+        ? document.activeElement
+        : null;
+
     const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+
+    const stripDecorativeGlyphs = (value) =>
+      String(value ?? "")
+        .replace(/[\uE000-\uF8FF]/g, " ")
+        .replace(/[\u200B-\u200D\uFEFF]/g, " ");
+
+    const cleanText = (value) => normalize(stripDecorativeGlyphs(value));
+
     const truncate = (value, max) => {
-        const text = normalize(value);
-        if (text.length <= max) {
-            return text;
-        }
-        return text.slice(0, Math.max(0, max - 1)) + "\u2026";
+      const text = cleanText(value);
+      if (!text) return "";
+      if (text.length <= max) return text;
+      return text.slice(0, Math.max(0, max - 3)) + "...";
     };
-    const visible = (el) => {
-        const style = window.getComputedStyle(el);
-        if (!style || style.visibility === "hidden" || style.display === "none") {
-            return false;
-        }
-        const rect = el.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
+
+    const compact = (obj) =>
+      Object.fromEntries(
+        Object.entries(obj).filter(([, value]) => {
+          if (value == null) return false;
+          if (value === "") return false;
+          if (value === false) return false;
+          if (Array.isArray(value)) return value.length > 0;
+          if (typeof value === "object") return Object.keys(value).length > 0;
+          return true;
+        })
+      );
+
+    const tagOf = (el) => (el.tagName || "").toLowerCase();
+
+    const styleOf = (el) => {
+      try {
+        return el.ownerDocument.defaultView.getComputedStyle(el);
+      } catch {
+        return null;
+      }
     };
+
+    const directText = (el) =>
+      cleanText(
+        Array.from(el.childNodes || [])
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.textContent || "")
+          .join(" ")
+      );
+
+    const fullText = (el) => cleanText(el.innerText || el.textContent || "");
+
+    const textFromIds = (rawIds, doc) =>
+      cleanText(
+        String(rawIds || "")
+          .split(/\s+/)
+          .map((id) => doc.getElementById(id))
+          .filter(Boolean)
+          .map((node) => node.innerText || node.textContent || "")
+          .join(" ")
+      );
+
+    const isHiddenInput = (el) =>
+      tagOf(el) === "input" && (el.getAttribute("type") || "").toLowerCase() === "hidden";
+
+    const isHidden = (el) => {
+      if (isHiddenInput(el)) return true;
+      const style = styleOf(el);
+      if (!style) return true;
+      if (style.display === "none") return true;
+      if (style.visibility === "hidden") return true;
+      if (el.hasAttribute("hidden")) return true;
+      return false;
+    };
+
+    const hasClickBehavior = (el) => {
+      const style = styleOf(el);
+      const tabindex = el.getAttribute("tabindex");
+      return !!(
+        (style && style.cursor === "pointer") ||
+        typeof el.onclick === "function" ||
+        el.hasAttribute("onclick") ||
+        (tabindex != null && tabindex !== "-1") ||
+        el.hasAttribute("aria-haspopup") ||
+        el.hasAttribute("data-click") ||
+        el.hasAttribute("data-action")
+      );
+    };
+
+    const isNativeInteractive = (el) => {
+      const tag = tagOf(el);
+      if (["a", "button", "input", "select", "textarea", "summary"].includes(tag)) return true;
+      if (el.hasAttribute("role")) return true;
+      if (el.isContentEditable) return true;
+      return false;
+    };
+
+    const isInteractive = (el) => isNativeInteractive(el) || hasClickBehavior(el);
+
+    const isVisibleEnough = (el) => {
+      if (isHidden(el)) return false;
+      if (CONTROL_TAGS.has(tagOf(el)) && !isHiddenInput(el)) return true;
+      if (isInteractive(el)) return true;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) return true;
+      if (fullText(el)) return true;
+      return el.childElementCount > 0;
+    };
+
+    const roleOf = (el) => {
+      const explicit = el.getAttribute("role");
+      if (explicit) return explicit;
+
+      const tag = tagOf(el);
+
+      if (tag === "a") return "link";
+      if (tag === "button" || tag === "summary") return "button";
+      if (tag === "select") return "combobox";
+      if (tag === "textarea") return "textbox";
+      if (tag === "option") return "option";
+      if (tag === "img") return "img";
+      if (tag === "ul" || tag === "ol") return "list";
+      if (tag === "li") return "listitem";
+      if (tag === "nav") return "navigation";
+      if (tag === "main") return "main";
+      if (tag === "header") return "banner";
+      if (tag === "footer") return "contentinfo";
+      if (tag === "article") return "article";
+      if (tag === "section") return "region";
+      if (tag === "form") return "form";
+      if (tag === "iframe") return "iframe";
+      if (/^h[1-6]$/.test(tag)) return "heading";
+
+      if (tag === "input") {
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        if (type === "checkbox") return "checkbox";
+        if (type === "radio") return "radio";
+        if (type === "file") return "file";
+        if (type === "range") return "slider";
+        if (["submit", "button", "reset"].includes(type)) return "button";
+        return "textbox";
+      }
+
+      if (el.isContentEditable) return "textbox";
+      return "generic";
+    };
+
+    const labelOf = (el, role) => {
+      const doc = el.ownerDocument;
+      const tag = tagOf(el);
+
+      const ariaLabel = el.getAttribute("aria-label");
+      if (ariaLabel) return ariaLabel;
+
+      const labelledBy = el.getAttribute("aria-labelledby");
+      if (labelledBy) {
+        const text = textFromIds(labelledBy, doc);
+        if (text) return text;
+      }
+
+      if (typeof el.labels !== "undefined" && el.labels && el.labels.length > 0) {
+        const text = cleanText(
+          Array.from(el.labels)
+            .map((label) => label.innerText || label.textContent || "")
+            .join(" ")
+        );
+        if (text) return text;
+      }
+
+      if (el.id) {
+        const byFor = doc.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (byFor) {
+          const text = cleanText(byFor.innerText || byFor.textContent || "");
+          if (text) return text;
+        }
+      }
+
+      const wrapped = el.closest("label");
+      if (wrapped) {
+        const text = cleanText(wrapped.innerText || wrapped.textContent || "");
+        if (text) return text;
+      }
+
+      const placeholder = el.getAttribute("placeholder");
+      if (placeholder) return placeholder;
+
+      const title = el.getAttribute("title");
+      if (title) return title;
+
+      const alt = el.getAttribute("alt");
+      if (alt) return alt;
+
+      if (tag === "input") {
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        if (["submit", "button", "reset"].includes(type) && el.value) {
+          return el.value;
+        }
+        if (role === "textbox") {
+          if (el.getAttribute("name")) return el.getAttribute("name");
+          if (el.id) return `#${el.id}`;
+        }
+      }
+
+      if (role === "textbox" || role === "combobox") {
+        if (el.getAttribute("name")) return el.getAttribute("name");
+        if (el.id) return `#${el.id}`;
+      }
+
+      if (role === "link" || role === "button" || role === "heading") {
+        return fullText(el);
+      }
+
+      if (role === "generic" && hasClickBehavior(el)) {
+        return fullText(el);
+      }
+
+      return "";
+    };
+
+    const stateOf = (el) =>
+      compact({
+        focused: activeElement === el,
+        disabled: "disabled" in el ? !!el.disabled : false,
+        checked: "checked" in el ? !!el.checked : false,
+        selected:
+          el.getAttribute("aria-selected") === "true"
+            ? true
+            : el.getAttribute("aria-selected") === "false"
+              ? false
+              : "selected" in el
+                ? !!el.selected
+                : false,
+        expanded:
+          el.getAttribute("aria-expanded") === "true"
+            ? true
+            : el.getAttribute("aria-expanded") === "false"
+              ? false
+              : null
+      });
+
     const cssSegment = (el) => {
-        if (el.id) {
-            return `#${CSS.escape(el.id)}`;
+      const tag = tagOf(el) || "*";
+      if (el.id) return `#${CSS.escape(el.id)}`;
+
+      const nameAttr = el.getAttribute("name");
+      let base = tag;
+
+      if (nameAttr && /^[a-zA-Z0-9_-]+$/.test(nameAttr)) {
+        base = `${tag}[name="${CSS.escape(nameAttr)}"]`;
+      } else {
+        const classes = Array.from(el.classList || [])
+          .filter((cls) => /^[a-zA-Z0-9_-]+$/.test(cls))
+          .slice(0, 1);
+        if (classes.length > 0) {
+          base = `${tag}.${CSS.escape(classes[0])}`;
         }
-        const tag = el.tagName.toLowerCase();
-        let index = 1;
-        let sibling = el.previousElementSibling;
-        while (sibling) {
-            if (sibling.tagName === el.tagName) {
-                index += 1;
-            }
-            sibling = sibling.previousElementSibling;
-        }
-        return `${tag}:nth-of-type(${index})`;
+      }
+
+      let index = 1;
+      let sibling = el.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName === el.tagName) index += 1;
+        sibling = sibling.previousElementSibling;
+      }
+
+      return `${base}:nth-of-type(${index})`;
     };
+
     const cssPath = (el) => {
-        const parts = [];
-        let current = el;
-        while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 6) {
-            parts.unshift(cssSegment(current));
-            if (current.id) {
-                break;
-            }
-            current = current.parentElement;
-        }
-        return parts.join(" > ");
+      const parts = [];
+      let current = el;
+      let depth = 0;
+
+      while (current && current.nodeType === Node.ELEMENT_NODE && depth < 5) {
+        parts.unshift(cssSegment(current));
+        if (current.id) break;
+        current = current.parentElement;
+        depth += 1;
+      }
+
+      return parts.join(" > ");
     };
-    const inferRole = (el) => {
-        const explicit = el.getAttribute("role");
-        if (explicit) {
-            return explicit;
-        }
-        const tag = el.tagName.toLowerCase();
-        if (tag === "a" && el.href) {
-            return "link";
-        }
-        if (tag === "button" || tag === "summary") {
-            return "button";
-        }
-        if (tag === "select") {
-            return "combobox";
-        }
-        if (tag === "textarea") {
-            return "textbox";
-        }
-        if (tag === "input") {
-            const type = (el.getAttribute("type") || "text").toLowerCase();
-            if (type === "checkbox") {
-                return "checkbox";
-            }
-            if (type === "radio") {
-                return "radio";
-            }
-            if (type === "file") {
-                return "file";
-            }
-            if (type === "button" || type === "submit" || type === "reset") {
-                return "button";
-            }
-            return "textbox";
-        }
-        if (el.isContentEditable) {
-            return "textbox";
-        }
-        return tag;
+
+    const bboxOf = (el) => {
+      const rect = el.getBoundingClientRect();
+      if (!(rect.width > 0 || rect.height > 0)) return null;
+      return {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
     };
-    const labelFor = (el) => {
-        const direct =
-            el.getAttribute("aria-label") ||
-            el.getAttribute("placeholder") ||
-            el.getAttribute("title") ||
-            "";
-        if (direct) {
-            return direct;
-        }
-        if (el.id) {
-            const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-            if (byFor) {
-                return byFor.innerText || byFor.textContent || "";
-            }
-        }
-        const wrapped = el.closest("label");
-        if (wrapped) {
-            return wrapped.innerText || wrapped.textContent || "";
-        }
-        return el.innerText || el.textContent || "";
+
+    const STRUCTURAL_ROLES = new Set([
+      "navigation",
+      "main",
+      "banner",
+      "contentinfo",
+      "article",
+      "region",
+      "list",
+      "listitem",
+      "form",
+      "iframe"
+    ]);
+
+    const LEAF_ROLES = new Set([
+      "link",
+      "button",
+      "textbox",
+      "checkbox",
+      "radio",
+      "combobox",
+      "file",
+      "slider",
+      "heading",
+      "img",
+      "option"
+    ]);
+
+    const LOCATOR_ROLES = new Set([
+      "link",
+      "button",
+      "textbox",
+      "checkbox",
+      "radio",
+      "combobox",
+      "file",
+      "slider"
+    ]);
+
+    const BBOX_ROLES = new Set([
+      "link",
+      "button",
+      "textbox",
+      "checkbox",
+      "radio",
+      "combobox",
+      "file",
+      "slider",
+      "img"
+    ]);
+
+    const collectChildElements = (el) => {
+      const out = Array.from(el.children || []);
+
+      if (el.shadowRoot) {
+        out.push(...Array.from(el.shadowRoot.children || []));
+      }
+
+      if (tagOf(el) === "iframe") {
+        try {
+          const frameDoc = el.contentDocument;
+          if (frameDoc && frameDoc.body) {
+            out.push(...Array.from(frameDoc.body.children || []));
+          }
+        } catch {}
+      }
+
+      return out.slice(0, MAX_CHILDREN);
     };
-    const interactiveSelector = [
-        "a[href]",
-        "button",
-        "input",
-        "select",
-        "textarea",
-        "summary",
-        "[role]",
-        "[contenteditable=\"\"]",
-        "[contenteditable=\"true\"]"
-    ].join(",");
-    const uniqueInteractive = Array.from(document.querySelectorAll(interactiveSelector))
-        .filter((el, index, items) => items.indexOf(el) === index)
-        .filter(visible)
-        .slice(0, 120);
-    const elements = uniqueInteractive.map((el, index) => {
-        const rect = el.getBoundingClientRect();
-        const tag = el.tagName.toLowerCase();
-        const value = typeof el.value === "string" ? el.value : "";
-        return {
-            id: `e${index + 1}`,
-            selector: cssPath(el),
-            tag,
-            role: inferRole(el),
-            label: truncate(labelFor(el), 160),
-            text: truncate(el.innerText || el.textContent || value, 160),
-            type: el.getAttribute("type") || "",
-            href: el.href || "",
-            placeholder: el.getAttribute("placeholder") || "",
-            disabled: !!el.disabled,
-            checked: !!el.checked,
-            active: document.activeElement === el,
-            value: truncate(value, 80),
-            bbox: {
-                x: Math.round(rect.x),
-                y: Math.round(rect.y),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height)
+
+    const isDecorativeGeneric = (node) =>
+      node &&
+      node.role === "generic" &&
+      !node.name &&
+      !node.url &&
+      !node.value &&
+      !node.children &&
+      !cleanText(node.text || "");
+
+    const isBadgeNode = (node) =>
+      node &&
+      node.role === "generic" &&
+      !node.name &&
+      !node.url &&
+      !node.value &&
+      !node.children &&
+      BADGE_TEXTS.has(cleanText(node.text || ""));
+
+    const mergeChild = (children, built) => {
+      if (!built) return;
+      if (built._children) {
+        children.push(...built._children);
+      } else {
+        children.push(built);
+      }
+    };
+
+    const buildNode = (el, depth, isRoot = false) => {
+      if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+      if (depth > MAX_DEPTH || nodeCount >= MAX_NODES) return null;
+
+      const tag = tagOf(el);
+      if (!tag || SKIP_TAGS.has(tag) || isHiddenInput(el)) return null;
+      if (!isRoot && isHidden(el)) return null;
+
+      const role = roleOf(el);
+      const inputType = (el.getAttribute("type") || "").toLowerCase();
+      const mustKeep = (CONTROL_TAGS.has(tag) && !isHiddenInput(el)) || role === "button" || role === "link";
+      const visibleEnough = isVisibleEnough(el);
+      const genericInteractive = role === "generic" && isInteractive(el);
+
+      const name = truncate(labelOf(el, role), MAX_TEXT);
+
+      let text = truncate(
+        role === "link" || role === "button" || role === "heading"
+          ? fullText(el)
+          : directText(el),
+        MAX_TEXT
+      );
+
+      if (name && text && cleanText(name) === cleanText(text)) {
+        text = "";
+      }
+
+      let value = "";
+      if (tag === "textarea" || tag === "select") {
+        value = truncate(el.value || "", MAX_VALUE);
+      } else if (
+        tag === "input" &&
+        !["hidden", "checkbox", "radio", "file", "submit", "button", "reset"].includes(inputType)
+      ) {
+        value = inputType === "password" ? (el.value ? "[masked]" : "") : truncate(el.value || "", MAX_VALUE);
+      } else if (el.isContentEditable) {
+        value = truncate(fullText(el), MAX_VALUE);
+      }
+
+      const url =
+        (tag === "a" && (el.href || el.getAttribute("href") || "")) ||
+        (tag === "img" && (el.src || el.getAttribute("src") || "")) ||
+        (tag === "iframe" && (el.src || el.getAttribute("src") || "")) ||
+        "";
+
+      const level = /^h[1-6]$/.test(tag)
+        ? Number(tag.slice(1))
+        : Number(el.getAttribute("aria-level") || 0) || null;
+
+      const state = stateOf(el);
+      const locator =
+        LOCATOR_ROLES.has(role) || genericInteractive ? { css: cssPath(el) } : null;
+      const bbox =
+        BBOX_ROLES.has(role) || (genericInteractive && visibleEnough) ? bboxOf(el) : null;
+
+      const children = [];
+      const badges = [];
+
+      if (nodeCount < MAX_NODES && !LEAF_ROLES.has(role)) {
+        for (const child of collectChildElements(el)) {
+          if (nodeCount >= MAX_NODES) break;
+          const built = buildNode(child, depth + 1, false);
+          if (!built) continue;
+
+          const builtChildren = built._children ? built._children : [built];
+          for (const item of builtChildren) {
+            if (role === "listitem" && isBadgeNode(item)) {
+              badges.push(cleanText(item.text));
+              continue;
             }
-        };
+            if (isDecorativeGeneric(item)) {
+              continue;
+            }
+            children.push(item);
+          }
+        }
+      }
+
+      const keepSelf =
+        isRoot ||
+        mustKeep ||
+        visibleEnough ||
+        STRUCTURAL_ROLES.has(role) ||
+        LEAF_ROLES.has(role) ||
+        genericInteractive ||
+        !!name ||
+        !!text ||
+        !!value ||
+        !!url ||
+        badges.length > 0 ||
+        children.length > 0;
+
+      if (!keepSelf) return null;
+
+      const ref = `e${nextRef++}`;
+      nodeCount += 1;
+      if (activeElement === el) activeRef = ref;
+
+      const keepTag =
+        role === "generic" ||
+        CONTROL_TAGS.has(tag) ||
+        tag === "img" ||
+        tag === "iframe";
+
+      const node = compact({
+        ref,
+        role,
+        tag: keepTag ? tag : "",
+        name,
+        text,
+        value,
+        url,
+        inputType,
+        placeholder: truncate(el.getAttribute("placeholder") || "", 60),
+        level,
+        badges: Array.from(new Set(badges)),
+        interactive: genericInteractive,
+        locator,
+        state,
+        bbox,
+        children
+      });
+
+      const flattenable =
+        !isRoot &&
+        role === "generic" &&
+        !genericInteractive &&
+        !mustKeep &&
+        !node.name &&
+        !node.text &&
+        !node.value &&
+        !node.url &&
+        !node.inputType &&
+        !node.placeholder &&
+        !node.level &&
+        !node.badges &&
+        !node.locator &&
+        !node.state &&
+        !node.bbox;
+
+      if (flattenable) {
+        if (children.length === 1) return children[0];
+        return { _children: children };
+      }
+
+      return node;
+    };
+
+    const rootElement = document.body || document.documentElement;
+    const root = rootElement ? buildNode(rootElement, 0, true) : null;
+
+    return compact({
+      url: window.location.href,
+      title: document.title || "",
+      viewport: {
+        width: Math.round(window.innerWidth || 0),
+        height: Math.round(window.innerHeight || 0)
+      },
+      activeRef,
+      root
     });
-    const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
-        .filter(visible)
-        .slice(0, 24)
-        .map((el) => ({
-            tag: el.tagName.toLowerCase(),
-            text: truncate(el.innerText || el.textContent || "", 200),
-            selector: cssPath(el)
-        }));
-    const textPreview = truncate(
-        document.body ? document.body.innerText || document.body.textContent || "" : "",
-        2000
-    );
-    return {
-        url: window.location.href,
-        title: document.title || "",
-        viewport: {
-            width: Math.round(window.innerWidth || 0),
-            height: Math.round(window.innerHeight || 0)
-        },
-        activeElement:
-            document.activeElement && document.activeElement !== document.body
-                ? cssPath(document.activeElement)
-                : null,
-        headings,
-        textPreview,
-        counts: {
-            elements: elements.length,
-            links: elements.filter((el) => el.role === "link").length,
-            buttons: elements.filter((el) => el.role === "button").length,
-            inputs: elements.filter((el) => ["textbox", "checkbox", "radio", "file", "combobox"].includes(el.role)).length
-        },
-        elements
-    };
-}"#;
+  }"#;
