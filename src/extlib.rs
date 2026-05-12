@@ -7,14 +7,11 @@ pub const LIB: &str = r#"
 ;;   (defun add (a b) (+ a b))
 ;;   (open "https://example.com")
 ;;   (open "https://example.com" #t)
+;;   (script-dir)
+;;   (read-file-text "/tmp/example.js")
+;;   (read-sibling-file "main.js")
+;;   (js-run "main.js" args)
 ;;   (parse-args args)
-;;   (args->js-object args)
-;;   (js-call args
-;;    "const id = args.id;"
-;;    "return { id };")
-;;   (js-call
-;;    "const resp = await fetch('https://www.v2ex.com/api/topics/latest.json');"
-;;    "return await resp.json();")
 
 
 (define-syntax def
@@ -89,6 +86,41 @@ pub const LIB: &str = r#"
      (%open-impl url #f))
     ((_ url no-reuse-tab)
      (%open-impl url no-reuse-tab))))
+
+(defun %string-last-index (text target)
+  (let loop ((index (- (string-length text) 1)))
+    (if (< index 0)
+        #f
+        (if (char=? (string-ref text index) target)
+            index
+            (loop (- index 1))))))
+
+(defun %path-dirname (path)
+  (let ((slash-index (%string-last-index path #\/)))
+    (if slash-index
+        (substring path 0 slash-index)
+        ".")))
+
+(defun script-dir ()
+  (%path-dirname openwalk-script-path))
+
+(defun %read-port-all-text (port)
+  (let ((out (open-output-string)))
+    (do ((chunk (read-string 4096 port)
+                (read-string 4096 port)))
+        ((eof-object? chunk)
+         (get-output-string out))
+      (write-string chunk out))))
+
+(defun read-file-text (path)
+  (let ((port (open-input-file path)))
+    (let ((text (%read-port-all-text port)))
+      (close-input-port port)
+      text)))
+
+(defun read-sibling-file (name)
+  (read-file-text
+    (string-append (script-dir) "/" name)))
 
 (defun %parse-args-error (message)
   (error (string-append "parse-args: " message)))
@@ -440,7 +472,7 @@ pub const LIB: &str = r#"
               (cdr rest)
               (string-append result separator (car rest)))))))
 
-(defun %parsed-args->js-object (parsed spec)
+(defun %parsed-args->js-object-literal (parsed spec)
   (let loop ((spec-rest spec) (parts '()))
     (if (null? spec-rest)
         (string-append "{" (%string-join (reverse parts) ", ") "}")
@@ -459,8 +491,8 @@ pub const LIB: &str = r#"
                   parts))
               (loop (cdr spec-rest) parts))))))
 
-(defun %args->js-object (args spec)
-  (%parsed-args->js-object (%parse-args args spec) spec))
+(defun %args->js-object-literal (args spec)
+  (%parsed-args->js-object-literal (%parse-args args spec) spec))
 
 (define-syntax parse-args
   (syntax-rules ()
@@ -469,29 +501,13 @@ pub const LIB: &str = r#"
     ((_ args spec)
      (%parse-args args spec))))
 
-(define-syntax args->js-object
-  (syntax-rules ()
-    ((_ args)
-     (%args->js-object args (%script-args-spec)))
-    ((_ args spec)
-     (%args->js-object args spec))))
-
-(define-syntax js-call
-  (syntax-rules ()
-    ((_  part )
-     (js-eval
-       (string-append
-         "(async () => {"
-         part 
-         "})()")))
-    ((_ args part ...)
-     (js-eval
-       (string-append
-         "(async (args) => {"
-         part ...
-         "})("
-         (args->js-object args)
-         ")")))))
-
+(defun js-run (filename args)
+  (js-eval
+    (string-append
+      "("
+      (read-sibling-file filename)
+      ")("
+      (%args->js-object-literal args (%script-args-spec))
+      ")")))
 
 "#;
