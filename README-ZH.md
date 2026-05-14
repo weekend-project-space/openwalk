@@ -1,8 +1,8 @@
 # OpenWalk
 
-Turn websites into reusable local commands.
+把网站变成你本地可复用的命令。
 
-OpenWalk is a local-first CLI that brings website capabilities, real-browser automation, and project tools together behind a single entry point. Search, trending feeds, page actions, and workflow orchestration no longer have to live as throwaway scripts. They become commands you can reuse, refine, and build on over time.
+OpenWalk 是一个 local-first CLI，把网站能力、真实浏览器自动化和项目工具统一到一个入口里。搜索、热门信息流、页面操作、工作流编排，不再只是一次性脚本，而是可以反复调用、逐步沉淀的命令。
 
 ```bash
 openwalk exec bing/search "Claude Code" 5
@@ -14,7 +14,7 @@ openwalk exec browser-open https://news.ycombinator.com -s=demo
 openwalk exec page-snapshot -s=demo
 ```
 
-What you get back is not a pile of scattered text, but structured output that is much easier to keep processing:
+你拿到的不是一堆零散文本，而是更适合继续处理的结构化结果：
 
 ```json
 {
@@ -30,19 +30,19 @@ What you get back is not a pile of scattered text, but structured output that is
 }
 ```
 
-If a tool is not installed yet, `openwalk exec` can fetch it from the hub into your current project and run it immediately.
+如果某个工具还没安装，`openwalk exec` 可以先从 hub 拉取到当前项目，再立即执行。
 
-## Why You Will Want To Keep Using It
+## 为什么会让人想继续用
 
-- Turn website capabilities into commands instead of one-off scripts
-- Use a real browser for automation instead of stopping at offline scraping
-- Stay local-first so your login state, files, and local environment are easier to reuse
-- Friendly for humans and for AI agents
-- Run ready-made tools right away, and grow custom tools into long-term team assets
+- 把网站能力变成命令，而不是一次性脚本
+- 用真实浏览器完成自动化，而不是只停留在离线抓取
+- local-first，更容易复用你的登录态、文件和本地环境
+- 对人友好，也对 AI Agent 友好
+- 现成工具可以直接跑，自定义工具可以慢慢沉淀成团队资产
 
-## Get Started In 30 Seconds
+## 30 秒上手
 
-### 1. Install
+### 1. 安装
 
 ```bash
 # Linux
@@ -54,13 +54,13 @@ curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main
 irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 | iex
 ```
 
-### 2. Initialize the current project
+### 2. 初始化当前项目
 
 ```bash
 openwalk init
 ```
 
-### 3. Run your first command
+### 3. 跑第一条命令
 
 ```bash
 openwalk exec bing/search "OpenAI" 5
@@ -68,7 +68,7 @@ openwalk exec reddit/hot LocalLLaMA
 openwalk exec v2ex/hot
 ```
 
-### 4. Open a real browser session
+### 4. 打开一个真实浏览器会话
 
 ```bash
 openwalk exec browser-open https://example.com -s=demo
@@ -76,22 +76,22 @@ openwalk exec page-snapshot -s=demo
 openwalk exec browser-close -s=demo
 ```
 
-## One Entry Point For Three Kinds Of Capabilities
+## 一个入口，统一三类能力
 
-### Ready-made website commands
+### 现成的网站命令
 
-Turn common website actions into stable commands:
+把常见网页操作直接变成稳定命令：
 
 - `bing/search`
 - `reddit/hot`
 - `v2ex/hot`
-- Plus more `search`, `hot`, `detail`, `comments`, and `download` style tools from the hub
+- 以及更多来自 hub 的 `search`、`hot`、`detail`、`comments`、`download` 一类工具
 
-These commands work well both for direct human use and for plugging into scripts, pipelines, and agent workflows.
+这类命令适合直接给人用，也适合接到脚本、流水线和 Agent 工作流里。
 
-### Built-in browser primitives
+### 内建的浏览器原语
 
-OpenWalk includes a set of browser capabilities you can call directly:
+OpenWalk 内建一组可以直接调用的浏览器能力：
 
 - `browser-open`
 - `page-goto`
@@ -104,24 +104,24 @@ OpenWalk includes a set of browser capabilities you can call directly:
 - `tab-close`
 - `browser-close`
 
-You can use these capabilities directly, or compose them into your own website workflows step by step.
+你可以直接使用这些能力，也可以用它们逐步拼出自己的网页工作流。
 
-### Project-level and global tools
+### 项目级和全局级工具
 
-OpenWalk is not only for running prebuilt commands. It also helps you turn capabilities into long-term reusable tools:
+OpenWalk 不只是跑现成命令，也支持把能力长期沉淀下来：
 
-- Workspace tools
-- Global tools
-- Tools pulled from the hub
-- Local `.scm` scripts
+- 工作区工具
+- 全局工具
+- 从 hub 拉取的工具
+- 本地 `.scm` 脚本
 
-Temporary scripts do not have to stay temporary forever. They can gradually grow into tools your team actually reuses.
+临时脚本不需要一直停留在“临时”阶段。它可以慢慢长成团队真正会复用的工具。
 
-## What `openwalkhub` Currently Supports
+## openwalkhub 当前支持的功能
 
-OpenWalk can pull tools from `openwalkhub` into the current project at execution time. The table below was last updated on `2026-05-13`.
+OpenWalk 可以在执行时从 `openwalkhub` 拉取工具到当前项目。下面这份表更新日期 `2026-05-13` 。
 
-| Site / Category | Available Commands                                                                                  |
+| 站点 / 分类     | 当前命令                                                                                            |
 | --------------- | --------------------------------------------------------------------------------------------------- |
 | `openwalkhub`   | `tools`                                                                                             |
 | `bilibili`      | `comments` `feed` `history` `me` `opus` `popular` `ranking` `search` `trending` `user-opus` `video` |
@@ -147,34 +147,34 @@ OpenWalk can pull tools from `openwalkhub` into the current project at execution
 | `youtube`       | `channel` `comments` `feed` `search` `transcript` `video`                                           |
 | `zhihu`         | `hot` `question` `search`                                                                           |
 
-Some of the best commands to show new users right away include:
+其中比较适合拿来直接展示给新用户的命令包括：
 
-- Trending and timelines: `reddit/hot` `v2ex/hot` `linuxdo/hot` `weibo/hot` `zhihu/hot` `hackernews/top` `producthunt/today`
-- Search: `bing/search` `reddit/search` `twitter/search` `youtube/search` `zhihu/search` `stackoverflow/search`
-- Detail and content reading: `v2ex/topic` `zhihu/question` `hackernews/thread` `reddit/thread` `youtube/video` `youtube/transcript`
-- Platform and account data: `github/me` `github/issues` `twitter/bookmarks` `twitter/notifications` `linkedin/profile`
+- 热门与时间线：`reddit/hot` `v2ex/hot` `linuxdo/hot` `weibo/hot` `zhihu/hot` `hackernews/top` `producthunt/today`
+- 搜索：`bing/search` `reddit/search` `twitter/search` `youtube/search` `zhihu/search` `stackoverflow/search`
+- 详情与内容读取：`v2ex/topic` `zhihu/question` `hackernews/thread` `reddit/thread` `youtube/video` `youtube/transcript`
+- 平台与账号数据：`github/me` `github/issues` `twitter/bookmarks` `twitter/notifications` `linkedin/profile`
 
-## For Humans And For AI Agents
+## 给人用，也给 AI Agent 用
 
-### For humans
+### 对人
 
-When you want to turn repetitive website actions into stable commands, OpenWalk feels very natural:
+当你想把重复网页操作变成稳定命令时，OpenWalk 很顺手：
 
-- `openwalk exec openwalkhub/tools` to see what tools are available on the hub
-- `openwalk tool list` to see what you can run right now
-- `openwalk tool info bing/search` to check how a specific tool works
-- Run ready-made website commands directly instead of reopening sites and clicking through them every time
+- `openwalk exec openwalkhub/tools` 看看hub上有什么工具
+- `openwalk tool list` 看看现在能跑什么
+- `openwalk tool info bing/search` 查看某个工具怎么用
+- 直接执行现成网站命令，而不是每次重新打开网页手动点一遍
 
-### For AI agents
+### 对 AI Agent
 
-If you want a stable execution surface for an AI agent, OpenWalk is a natural fit:
+如果你在给 AI Agent 找一个稳定的执行面，OpenWalk 很自然：
 
-- Agents can call ready-made commands instead of rediscovering websites from scratch every time
-- Browser capabilities can reuse the real local environment
-- Structured output is easier to feed into downstream reasoning, extraction, and orchestration
-- A website flow explored once can become a command that runs directly next time
+- Agent 可以调用现成命令，而不是每次从零探索网站
+- 浏览器能力可以复用真实本地环境
+- 结构化输出更容易接入后续推理、提取和编排
+- 已经探索过一次的网站流程，可以沉淀成下一次直接可跑的命令
 
-## Continue From Here
+## 从这里继续
 
 ```bash
 openwalk exec openwalkhub/tools
@@ -183,4 +183,4 @@ openwalk tool info bing/search
 openwalk tool info browser-open
 ```
 
-For the full manual, installation details, tool authoring, environment variables, and directory structure, see [GUIDE.md](./GUIDE.md).
+完整手册、安装细节、工具编写方式、环境变量和目录结构见 [GUIDE.md](./GUIDE.md)。
