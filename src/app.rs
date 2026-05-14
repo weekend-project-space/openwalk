@@ -74,6 +74,7 @@ struct ToolInfoView {
 struct RuntimeInvocationArgs {
     runtime_args: Vec<String>,
     session: Option<String>,
+    all: bool,
     output_format: OutputFormat,
 }
 
@@ -612,15 +613,21 @@ async fn run_scheme_script(
         parsed_args.session.clone(),
     )
     .await;
-    let output_payload = result.map(|result| {
-        json!({
-            // "mode": mode,
-            "script": script_path.display().to_string(),
-            "args": parsed_args.runtime_args,
-            "result": scheme_runtime::scheme_value_to_json(&result),
-            // "status": "executed",
+
+    let output_payload = if parsed_args.all {
+        result.map(|result| {
+            json!({
+                // "mode": mode,
+                "script": script_path.display().to_string(),
+                "args": parsed_args.runtime_args,
+                "result": scheme_runtime::scheme_value_to_json(&result),
+                // "status": "executed",
+            })
         })
-    });
+    } else {
+        result.map(|result| scheme_runtime::scheme_value_to_json(&result))
+    };
+
     let shutdown = browser.shutdown().await;
 
     let payload = output_payload?;
@@ -667,16 +674,21 @@ async fn run_builtin_tool(
         parsed_args.session.clone(),
     )
     .await;
-    let output_payload = result.map(|result| {
-        json!({
-            // "mode": mode,
-            "tool": tool,
-            // "source": "local-host-function",
-            "args": runtime_args,
-            "result": scheme_runtime::scheme_value_to_json(&result),
-            // "status": "executed",
+
+    let output_payload = if parsed_args.all {
+        result.map(|result| {
+            json!({
+                // "mode": mode,
+                "tool": tool,
+                "args": parsed_args.runtime_args,
+                "result": scheme_runtime::scheme_value_to_json(&result),
+                // "status": "executed",
+            })
         })
-    });
+    } else {
+        result.map(|result| scheme_runtime::scheme_value_to_json(&result))
+    };
+
     let shutdown = browser.shutdown().await;
 
     let payload = output_payload?;
@@ -689,6 +701,7 @@ async fn run_builtin_tool(
 fn extract_common_runtime_args(args: &[String]) -> Result<RuntimeInvocationArgs> {
     let mut runtime_args = Vec::new();
     let mut session: Option<String> = None;
+    let mut all: bool = false;
     let mut output_format = OutputFormat::default();
     let mut passthrough = false;
     let mut index = 0usize;
@@ -703,6 +716,12 @@ fn extract_common_runtime_args(args: &[String]) -> Result<RuntimeInvocationArgs>
 
         if arg == "--" {
             passthrough = true;
+            index += 1;
+            continue;
+        }
+
+        if arg == "-a" || arg == "--all" {
+            all = true;
             index += 1;
             continue;
         }
@@ -765,6 +784,7 @@ fn extract_common_runtime_args(args: &[String]) -> Result<RuntimeInvocationArgs>
     Ok(RuntimeInvocationArgs {
         runtime_args,
         session,
+        all,
         output_format,
     })
 }
