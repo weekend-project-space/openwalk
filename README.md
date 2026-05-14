@@ -71,7 +71,7 @@ openwalk exec v2ex/hot
 ### 4. Open a real browser session
 
 ```bash
-openwalk exec browser-open https://example.com -s=demo
+openwalk exec browser-open https://example.com -s=demo --headed
 openwalk exec page-snapshot -s=demo
 openwalk exec browser-close -s=demo
 ```
