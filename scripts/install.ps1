@@ -79,7 +79,41 @@ function Get-ReleasePath {
 }
 
 function Get-TargetTriple {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    $arch = $null
+
+    try {
+        $runtimeInformation = [System.Type]::GetType("System.Runtime.InteropServices.RuntimeInformation")
+        if ($runtimeInformation) {
+            $archProperty = $runtimeInformation.GetProperty("OSArchitecture", [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static)
+            if ($archProperty) {
+                $arch = $archProperty.GetValue($null, @()).ToString()
+            }
+        }
+    } catch {
+    }
+
+    if (-not $arch) {
+        $processorArchitecture = [Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITECTURE")
+        $processorArchitectureW6432 = [Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITEW6432")
+        $detectedArchitecture = if (-not [string]::IsNullOrWhiteSpace($processorArchitectureW6432)) {
+            $processorArchitectureW6432
+        } else {
+            $processorArchitecture
+        }
+
+        switch (($detectedArchitecture ?? "").ToUpperInvariant()) {
+            "AMD64" { $arch = "X64" }
+            "X86" {
+                if ([Environment]::Is64BitOperatingSystem) {
+                    $arch = "X64"
+                } else {
+                    Fail "unsupported Windows architecture: x86"
+                }
+            }
+            "ARM64" { $arch = "Arm64" }
+            default { Fail "unsupported Windows architecture: $detectedArchitecture" }
+        }
+    }
 
     switch ($arch) {
         "X64" { return "x86_64-pc-windows-msvc" }
@@ -165,7 +199,7 @@ function Ensure-UserPath {
     Write-Log "added $Directory to user PATH"
 }
 
-if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+if (-not $env:OS -or $env:OS -ne "Windows_NT") {
     Fail "this installer is intended for Windows"
 }
 
