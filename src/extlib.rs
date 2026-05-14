@@ -64,12 +64,34 @@ pub const LIB: &str = r#"
       (substring url 0 (- (string-length url) 1))
       url))
 
+(defun string-contains? (str sub)
+  (let ((len (string-length str))
+        (sub-len (string-length sub)))
+
+    (let loop ((i 0))
+      (cond
+        ((> (+ i sub-len) len)
+         #f)
+
+        ((string=? (substring str i (+ i sub-len)) sub)
+         #t)
+
+        (else
+         (loop (+ i 1)))))))
+
 (defun %find-tab-by-url (url)
-  (let* ((pairs (%tab-url-id-alist))
-         (entry (or (assoc url pairs)
-                    (assoc (%url-with-trailing-slash url) pairs)
-                    (assoc (%url-without-trailing-slash url) pairs))))
-    (if entry (cdr entry) #f)))
+  (let ((pairs (%tab-url-id-alist)))
+    (let loop ((rest pairs))
+      (cond
+        ((null? rest) #f)
+
+        ((string-contains?
+           (caar rest)
+           url)
+         (cdar rest))
+
+        (else
+         (loop (cdr rest)))))))
 
 (defun %open-impl (url no-reuse-tab)
   (let ((session-name openwalk-session-name))

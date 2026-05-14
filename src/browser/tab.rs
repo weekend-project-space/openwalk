@@ -146,7 +146,7 @@ impl BrowserActor {
         // Re-sync from browser so returned index always reflects current browser tab order.
         self.pages.push(page.clone());
         self.active_page = Some(self.pages.len() - 1);
-        page.bring_to_front().await.ok();
+        // page.bring_to_front().await.ok();
         self.refresh_pages_from_connected_browser().await?;
 
         let index = self.active_page.unwrap_or(0);
@@ -172,9 +172,9 @@ impl BrowserActor {
             .ok_or_else(|| anyhow!("tab index `{index}` is out of range"))?;
         self.ensure_network_tracking_for_page(page.clone()).await?;
         self.ensure_console_tracking_for_page(page.clone()).await?;
-        page.bring_to_front()
-            .await
-            .with_context(|| format!("failed to activate tab `{index}`"))?;
+        // page.bring_to_front()
+        //     .await
+        //     .with_context(|| format!("failed to activate tab `{index}`"))?;
         self.active_page = Some(index);
         self.persist_current_active_page()?;
         let short_ids = tab_short_ids(self.pages.as_slice(), Self::TAB_ID_ABBREV_MIN);
