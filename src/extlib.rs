@@ -142,12 +142,18 @@ pub const LIB: &str = r#"
       (close-input-port port)
       text)))
 
-(defun %path-join (dir name)
-  (let ((separator
-          (if (%string-last-index dir #\\)
-              "\\"
-              "/")))
-    (string-append dir separator name)))
+(define (%path-join dir name)
+
+  (define (ends-with-separator? s)
+    (let ((len (string-length s)))
+      (and (> len 0)
+           (let ((c (string-ref s (- len 1))))
+             (or (char=? c #\/)
+                 (char=? c #\\))))))
+
+  (if (ends-with-separator? dir)
+      (string-append dir name)
+      (string-append dir "/" name)))
 
 (defun read-sibling-file (name)
   (read-file-text
