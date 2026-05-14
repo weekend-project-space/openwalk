@@ -142,9 +142,16 @@ pub const LIB: &str = r#"
       (close-input-port port)
       text)))
 
+(defun %path-join (dir name)
+  (let ((separator
+          (if (%string-last-index dir #\\)
+              "\\"
+              "/")))
+    (string-append dir separator name)))
+
 (defun read-sibling-file (name)
   (read-file-text
-    (string-append (script-dir) "/" name)))
+    (%path-join (script-dir) name)))
 
 (defun %parse-args-error (message)
   (error (string-append "parse-args: " message)))
