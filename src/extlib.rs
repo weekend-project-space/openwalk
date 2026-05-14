@@ -144,16 +144,14 @@ pub const LIB: &str = r#"
 
 (define (%path-join dir name)
 
-  (define (ends-with-separator? s)
-    (let ((len (string-length s)))
-      (and (> len 0)
-           (let ((c (string-ref s (- len 1))))
-             (or (char=? c #\/)
-                 (char=? c #\\))))))
+  (let* ((sep (%path-separator dir))
+         (len (string-length dir)))
 
-  (if (ends-with-separator? dir)
-      (string-append dir name)
-      (string-append dir "/" name)))
+    (if (and (> len 0)
+             (or (char=? (string-ref dir (- len 1)) #\/)
+                 (char=? (string-ref dir (- len 1)) #\\)))
+        (string-append dir name)
+        (string-append dir sep name))))
 
 (defun read-sibling-file (name)
   (read-file-text
