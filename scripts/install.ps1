@@ -101,7 +101,11 @@ function Get-TargetTriple {
             $processorArchitecture
         }
 
-        switch (($detectedArchitecture ?? "").ToUpperInvariant()) {
+        if ($null -eq $detectedArchitecture) {
+            $detectedArchitecture = ""
+        }
+
+        switch ($detectedArchitecture.ToUpperInvariant()) {
             "AMD64" { $arch = "X64" }
             "X86" {
                 if ([Environment]::Is64BitOperatingSystem) {
