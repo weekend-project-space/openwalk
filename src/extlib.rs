@@ -119,11 +119,31 @@ pub const LIB: &str = r#"
             index
             (loop (- index 1))))))
 
+(defun %path-last-separator-index (path)
+  (let ((slash-index (%string-last-index path #\/))
+        (backslash-index (%string-last-index path #\\)))
+    (cond
+      ((and slash-index backslash-index)
+       (if (> slash-index backslash-index)
+           slash-index
+           backslash-index))
+      (slash-index slash-index)
+      (backslash-index backslash-index)
+      (else #f))))
+
 (defun %path-dirname (path)
-  (let ((slash-index (%string-last-index path #\/)))
-    (if slash-index
-        (substring path 0 slash-index)
-        ".")))
+  (let ((separator-index (%path-last-separator-index path)))
+    (cond
+      ((not separator-index)
+       ".")
+      ;; Preserve the separator for filesystem roots like "/" and "C:\".
+      ((or (= separator-index 0)
+           (and (= separator-index 2)
+                (> (string-length path) 2)
+                (char=? (string-ref path 1) #\:)))
+       (substring path 0 (+ separator-index 1)))
+      (else
+       (substring path 0 separator-index)))))
 
 (defun script-dir ()
   (%path-dirname openwalk-script-path))
@@ -141,6 +161,11 @@ pub const LIB: &str = r#"
     (let ((text (%read-port-all-text port)))
       (close-input-port port)
       text)))
+
+(defun %path-separator (path)
+  (if (%string-last-index path #\\)
+      "\\"
+      "/"))
 
 (define (%path-join dir name)
 
