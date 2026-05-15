@@ -51,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1 | iex
+iex "& { $(irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1) }"
 ```
 
 ### 2. 初始化当前项目
