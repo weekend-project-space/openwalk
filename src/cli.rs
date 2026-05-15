@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
     name = "openwalk",
     version,
     about = "Local-first tool runner with built-in browser automation",
-    after_help = "Examples:\n  openwalk tool list\n  openwalk tool info browser-open\n  openwalk exec browser-open https://example.com -s=demo\n\n",
+    after_help = "Examples:\n  openwalk exec openwalkhub/tools\n  openwalk tool list\n  openwalk tool info browser-open\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
     arg_required_else_help = true
 )]
 pub struct Cli {
