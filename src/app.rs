@@ -2432,6 +2432,9 @@ mod tests {
 
     #[test]
     fn extract_common_runtime_args_uses_session_from_env_by_default() {
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("session env lock should be acquired");
         let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "env-default");
 
         let parsed = extract_common_runtime_args(&["https://example.com".to_string()])
@@ -2443,6 +2446,9 @@ mod tests {
 
     #[test]
     fn extract_common_runtime_args_cli_session_overrides_env() {
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("session env lock should be acquired");
         let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "env-default");
 
         let parsed = extract_common_runtime_args(&[
@@ -2457,6 +2463,9 @@ mod tests {
 
     #[test]
     fn extract_common_runtime_args_ignores_empty_session_env() {
+        let _env_guard = HUB_ENV_LOCK
+            .lock()
+            .expect("session env lock should be acquired");
         let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "");
 
         let parsed = extract_common_runtime_args(&["https://example.com".to_string()])

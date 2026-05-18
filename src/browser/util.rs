@@ -54,15 +54,19 @@ pub(super) fn locator_name(kind: LocatorKind) -> &'static str {
 }
 
 pub(super) fn env_flag_is_truthy(name: &str) -> bool {
-    env::var(name)
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        .unwrap_or(false)
+    env_flag_from_env_value(env::var(name).ok().as_deref()) == Some(true)
 }
 
-pub(super) fn env_flag_is_false(name: &str) -> bool {
-    env::var(name)
-        .map(|value| matches!(value.as_str(), "0" | "false" | "FALSE" | "no" | "NO"))
-        .unwrap_or(false)
+pub(super) fn env_flag_value(name: &str) -> Option<bool> {
+    env_flag_from_env_value(env::var(name).ok().as_deref())
+}
+
+fn env_flag_from_env_value(raw: Option<&str>) -> Option<bool> {
+    match raw {
+        Some("1" | "true" | "TRUE" | "yes" | "YES") => Some(true),
+        Some("0" | "false" | "FALSE" | "no" | "NO") => Some(false),
+        _ => None,
+    }
 }
 
 pub(super) fn browser_request_timeout() -> Duration {
@@ -130,6 +134,27 @@ pub fn parse_mouse_button(input: &str) -> Result<MouseButton> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn env_flag_from_env_value_accepts_truthy_values() {
+        for value in ["1", "true", "TRUE", "yes", "YES"] {
+            assert_eq!(env_flag_from_env_value(Some(value)), Some(true));
+        }
+    }
+
+    #[test]
+    fn env_flag_from_env_value_accepts_falsey_values() {
+        for value in ["0", "false", "FALSE", "no", "NO"] {
+            assert_eq!(env_flag_from_env_value(Some(value)), Some(false));
+        }
+    }
+
+    #[test]
+    fn env_flag_from_env_value_rejects_unknown_values() {
+        assert_eq!(env_flag_from_env_value(Some("True")), None);
+        assert_eq!(env_flag_from_env_value(Some("maybe")), None);
+        assert_eq!(env_flag_from_env_value(None), None);
+    }
 
     #[test]
     fn duration_secs_from_env_value_accepts_positive_integers() {

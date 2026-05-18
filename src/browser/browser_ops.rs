@@ -59,14 +59,11 @@ impl BrowserActor {
         })?;
         builder = builder.user_data_dir(&profile_dir);
 
-        let headed = match options.headless {
-            Some(headless) => !headless,
-            None => {
-                super::util::env_flag_is_truthy("OPENWALK_HEADFUL")
-                    || super::util::env_flag_is_false("OPENWALK_HEADLESS")
-            }
-        };
-        if headed {
+        let headless = options
+            .headless
+            .or_else(|| super::util::env_flag_value("OPENWALK_HEADLESS"))
+            .unwrap_or(true);
+        if !headless {
             builder = builder.with_head();
         }
 
