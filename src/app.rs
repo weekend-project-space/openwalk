@@ -7,6 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use serde_json::json;
 
+const OPENWALK_SESSION_NAME_ENV: &str = "OPENWALK_SESSION_NAME";
+
 use crate::{
     browser::{
         attach_browser_session_with_options, ensure_browser_session_with_options, BrowserService,
@@ -700,7 +702,9 @@ async fn run_builtin_tool(
 
 fn extract_common_runtime_args(args: &[String]) -> Result<RuntimeInvocationArgs> {
     let mut runtime_args = Vec::new();
-    let mut session: Option<String> = None;
+    let mut session = std::env::var(OPENWALK_SESSION_NAME_ENV)
+        .ok()
+        .filter(|value| !value.is_empty());
     let mut all: bool = false;
     let mut output_format = OutputFormat::default();
     let mut passthrough = false;
@@ -2423,6 +2427,42 @@ mod tests {
         .expect("runtime args should parse with json format");
 
         assert_eq!(parsed.output_format, OutputFormat::Json);
+        assert_eq!(parsed.runtime_args, vec!["https://example.com".to_string()]);
+    }
+
+    #[test]
+    fn extract_common_runtime_args_uses_session_from_env_by_default() {
+        let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "env-default");
+
+        let parsed = extract_common_runtime_args(&["https://example.com".to_string()])
+            .expect("runtime args should pick up session from env");
+
+        assert_eq!(parsed.session.as_deref(), Some("env-default"));
+        assert_eq!(parsed.runtime_args, vec!["https://example.com".to_string()]);
+    }
+
+    #[test]
+    fn extract_common_runtime_args_cli_session_overrides_env() {
+        let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "env-default");
+
+        let parsed = extract_common_runtime_args(&[
+            "https://example.com".to_string(),
+            "--session=cli-session".to_string(),
+        ])
+        .expect("runtime args should prefer explicit cli session");
+
+        assert_eq!(parsed.session.as_deref(), Some("cli-session"));
+        assert_eq!(parsed.runtime_args, vec!["https://example.com".to_string()]);
+    }
+
+    #[test]
+    fn extract_common_runtime_args_ignores_empty_session_env() {
+        let _env_guard = EnvVarGuard::set(OPENWALK_SESSION_NAME_ENV, "");
+
+        let parsed = extract_common_runtime_args(&["https://example.com".to_string()])
+            .expect("empty session env should be treated as unset");
+
+        assert_eq!(parsed.session, None);
         assert_eq!(parsed.runtime_args, vec!["https://example.com".to_string()]);
     }
 

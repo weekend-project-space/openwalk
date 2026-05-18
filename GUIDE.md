@@ -112,6 +112,8 @@ Note: built-in commands such as `browser-open` cannot be used with `run`.
 | `-f <fmt>` / `--format <fmt>`    | Output format: `yaml`, `md`, `json`                             |
 | `--`                             | Stop parsing OpenWalk runtime options and pass the remaining arguments to the script as-is |
 
+If `OPENWALK_SESSION_NAME` is set, it is used as the default session. An explicit `-s` / `--session` flag takes precedence.
+
 Examples:
 
 ```bash
@@ -240,6 +242,7 @@ Workspace tool path:
 | `OPENWALK_HOME`                | Override the global home directory, default is `~/.openwalk` |
 | `OPENWALK_HUB_GIT_URL`         | Specify the tool hub repository                    |
 | `OPENWALK_HUB_GIT_REF`         | Specify the tool hub branch or ref                 |
+| `OPENWALK_SESSION_NAME`        | Provide the default browser session name when `-s` / `--session` is not passed |
 | `OPENWALK_BROWSER_BIN`         | Specify the Chromium / Chrome executable           |
 | `OPENWALK_BROWSER_PROFILE_DIR` | Override the default non-session profile           |
 | `OPENWALK_NO_SANDBOX`          | Disable the browser sandbox when launching         |
