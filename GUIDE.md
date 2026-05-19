@@ -246,5 +246,6 @@ Workspace tool path:
 | `OPENWALK_BROWSER_BIN`         | Specify the Chromium / Chrome executable           |
 | `OPENWALK_BROWSER_PROFILE_DIR` | Override the default non-session profile           |
 | `OPENWALK_NO_SANDBOX`          | Disable the browser sandbox when launching         |
-| `OPENWALK_HEADLESS`            | Control headless launch in non-session mode        |
-| `OPENWALK_HEADFUL`             | Control headed launch in non-session mode          |
+| `OPENWALK_HEADLESS`            | Control non-session browser mode: truthy values keep headless, falsey values launch headed |
+
+For non-session `browser-open`, `OPENWALK_HEADLESS=1` keeps the default headless mode, and `OPENWALK_HEADLESS=0` launches a headed browser. The `--headed` flag takes precedence over the environment variable.
