@@ -59,6 +59,7 @@ pub struct ProjectInstallArgs {}
 
 #[derive(Debug, Args)]
 /// Shared argument shape for commands that dispatch a single tool invocation.
+#[command(disable_help_flag = true)]
 pub struct ToolExecArgs {
     /// Scheme script path or tool name, for example ./demo.scm
     pub tool: String,
@@ -244,6 +245,20 @@ mod tests {
             Command::Exec(args) => {
                 assert_eq!(args.tool, "browser-open");
                 assert_eq!(args.args, vec!["-s=parallel-a", "https://example.com"]);
+            }
+            other => panic!("expected exec command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_exec_command_with_tool_help_arg() {
+        let cli = Cli::try_parse_from(["openwalk", "exec", "browser-open", "--help"])
+            .expect("exec command should preserve tool help as an argument");
+
+        match cli.command {
+            Command::Exec(args) => {
+                assert_eq!(args.tool, "browser-open");
+                assert_eq!(args.args, vec!["--help"]);
             }
             other => panic!("expected exec command, got {other:?}"),
         }

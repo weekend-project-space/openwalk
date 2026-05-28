@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::{
+    info::show_tool_info,
     install::ensure_workspace_package_installed,
     target::{
         resolve_global_tool_target, resolve_run_target, resolve_script_target,
@@ -34,6 +35,10 @@ pub(super) async fn run_local(args: ToolExecArgs) -> Result<()> {
 
     let workspace = Workspace::discover()?;
     let global_home = GlobalHome::discover()?;
+    if is_tool_help_request(&cli_args) {
+        return show_tool_info(&workspace, &global_home, tool, "yaml".to_string());
+    }
+
     let script_path = if let Some(path) = resolve_script_target(&tool)? {
         path
     } else {
@@ -61,6 +66,10 @@ pub(super) async fn exec_tool(
         args: cli_args,
     } = args;
 
+    if is_tool_help_request(&cli_args) {
+        return show_tool_info(workspace, global_home, tool, "yaml".to_string());
+    }
+
     if let Some(script_path) = resolve_script_target(&tool)? {
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
     }
@@ -79,6 +88,10 @@ pub(super) async fn exec_tool(
 
     let installed = ensure_workspace_package_installed(workspace, &tool)?;
     run_scheme_script(global_home, "exec", &installed.entry_path, &cli_args).await
+}
+
+pub(super) fn is_tool_help_request(args: &[String]) -> bool {
+    matches!(args, [arg] if arg == "--help" || arg == "-h")
 }
 
 async fn run_scheme_script(

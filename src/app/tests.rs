@@ -658,6 +658,17 @@ fn tool_usage_from_metadata_renders_required_and_optional_args() {
 }
 
 #[test]
+fn tool_help_request_requires_help_as_the_only_tool_arg() {
+    assert!(exec::is_tool_help_request(&["--help".to_string()]));
+    assert!(exec::is_tool_help_request(&["-h".to_string()]));
+    assert!(!exec::is_tool_help_request(&[
+        "--help".to_string(),
+        "extra".to_string()
+    ]));
+    assert!(!exec::is_tool_help_request(&["--headed".to_string()]));
+}
+
+#[test]
 fn render_tool_list_lines_aligns_usage_column() {
     let lines = render_tool_list_lines(&[
         ToolListEntry {
