@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
     name = "openwalk",
     version,
     about = "Local-first tool runner with built-in browser automation",
-    after_help = "Examples:\n  openwalk exec openwalkhub/tools\n  openwalk tool list\n  openwalk tool info browser-open\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
+    after_help = "Examples:\n  openwalk exec openwalkhub/tools\n  openwalk tool ls\n  openwalk exec browser-open --help\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -19,11 +19,11 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize the current project
-    Init(InitArgs),
+    // Init(InitArgs),
     /// Install tools declared in openwalk.json
     Install(ProjectInstallArgs),
     ///  Run a workspace tool or local Scheme script
-    Run(ToolExecArgs),
+    // Run(ToolExecArgs),
     /// Execute a built-in tool, script, or installed tool
     Exec(ToolExecArgs),
     ///  List, inspect, add, install, and remove tools
@@ -77,28 +77,28 @@ pub struct ToolExecArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ToolCommand {
-    /// Add a tool package into the current workspace.
-    Add {
-        /// Tool package name, for example browser-tools
-        package: String,
-    },
-    /// Remove a tool package from the current workspace.
-    Remove {
-        /// Tool package name, for example browser-tools
-        package: String,
-    },
-    /// Install a tool package into the global openwalk home and create a runnable shim.
-    Install {
-        /// Tool package name, for example browser-tools
-        package: String,
-    },
-    /// Uninstall a tool package from the global openwalk home and remove its shim.
-    Uninstall {
-        /// Tool package name, for example browser-tools
-        package: String,
-    },
+    // /// Add a tool package into the current workspace.
+    // Add {
+    //     /// Tool package name, for example browser-tools
+    //     package: String,
+    // },
+    // /// Remove a tool package from the current workspace.
+    // Remove {
+    //     /// Tool package name, for example browser-tools
+    //     package: String,
+    // },
+    // /// Install a tool package into the global openwalk home and create a runnable shim.
+    // Install {
+    //     /// Tool package name, for example browser-tools
+    //     package: String,
+    // },
+    // /// Uninstall a tool package from the global openwalk home and remove its shim.
+    // Uninstall {
+    //     /// Tool package name, for example browser-tools
+    //     package: String,
+    // },
     /// List runnable built-in, workspace, and global tools.
-    List {
+    Ls {
         /// Output format: yaml (default compact list), md, or json.
         #[arg(short = 'f', long = "format", default_value = "yaml")]
         format: String,
@@ -117,6 +117,7 @@ pub enum ToolCommand {
 mod tests {
     use super::*;
 
+    #[cfg(any())]
     #[test]
     fn parses_init_with_name_tools_and_force() {
         let cli = Cli::try_parse_from([
@@ -140,6 +141,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_init_without_flags_uses_defaults() {
         let cli = Cli::try_parse_from(["openwalk", "init"]).expect("bare init should parse");
@@ -155,6 +157,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_run_command_with_trailing_args() {
         let cli = Cli::try_parse_from([
@@ -186,6 +189,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_run_command_with_session() {
         let cli = Cli::try_parse_from(["openwalk", "run", "baidu-search", "-s=default", "rust"])
@@ -266,12 +270,12 @@ mod tests {
 
     #[test]
     fn parses_tool_list_format_flag() {
-        let cli = Cli::try_parse_from(["openwalk", "tool", "list", "--format=json"])
+        let cli = Cli::try_parse_from(["openwalk", "tool", "ls", "--format=json"])
             .expect("tool list should parse");
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::List { format },
+                command: ToolCommand::Ls { format },
             } => {
                 assert_eq!(format, "json");
             }
@@ -311,6 +315,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_tool_add_package() {
         let cli = Cli::try_parse_from(["openwalk", "tool", "add", "browser-tools"])
@@ -326,6 +331,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_tool_remove_package() {
         let cli = Cli::try_parse_from(["openwalk", "tool", "remove", "browser-tools"])
@@ -341,6 +347,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_tool_install_package() {
         let cli = Cli::try_parse_from(["openwalk", "tool", "install", "browser-tools"])
@@ -356,6 +363,7 @@ mod tests {
         }
     }
 
+    #[cfg(any())]
     #[test]
     fn parses_tool_uninstall_package() {
         let cli = Cli::try_parse_from(["openwalk", "tool", "uninstall", "browser-tools"])

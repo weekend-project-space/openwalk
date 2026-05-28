@@ -4,13 +4,12 @@ use anyhow::{bail, Result};
 
 use crate::{
     builtin_tools,
-    output::parse_output_format,
+    output::{parse_output_format, print_execution_result, OutputFormat},
     tool_metadata::{load_tool_metadata, ToolArgument},
     workspace::{GlobalHome, Workspace},
 };
 
 use super::{
-    list::print_tool_output,
     presentation::{tool_usage_from_metadata, trim_tool_description},
     target::{
         package_exists, resolve_global_tool_target, resolve_script_target,
@@ -28,13 +27,7 @@ pub(super) fn show_tool_info(
     let output_format = parse_output_format(&format)?;
     let info = load_tool_info(workspace, global_home, &target)?;
     let view = build_tool_info_view(&info, &target);
-    let tool_name = view.name.clone();
-    print_tool_output(
-        output_format,
-        "tool-info",
-        Some(tool_name.as_str()),
-        serde_json::to_value(view)?,
-    )
+    print_tool_info_view(output_format, &view)
 }
 
 pub(super) fn build_tool_info_view(info: &ToolInfoEntry, target: &str) -> ToolInfoView {
@@ -69,6 +62,142 @@ fn display_tool_source(source: &str) -> String {
         "global-tool" => "global".to_string(),
         "script-path" => "script".to_string(),
         _ => source.to_string(),
+    }
+}
+
+pub(super) fn print_tool_info_view(format: OutputFormat, view: &ToolInfoView) -> Result<()> {
+    match format {
+        OutputFormat::Json => print_execution_result(format, &serde_json::to_value(view)?),
+        OutputFormat::Yaml => {
+            print!("{}", render_tool_help_text(view));
+            Ok(())
+        }
+        OutputFormat::Md => {
+            print!("{}", render_tool_help_markdown(view));
+            Ok(())
+        }
+    }
+}
+
+pub(super) fn render_tool_help_text(view: &ToolInfoView) -> String {
+    let mut out = String::new();
+    out.push_str(view.name.as_str());
+    out.push_str("\n\n");
+    out.push_str(view.description.as_str());
+    out.push_str("\n\n");
+
+    out.push_str("Usage:\n");
+    out.push_str("  openwalk exec ");
+    out.push_str(view.usage.as_str());
+    out.push_str("\n");
+
+    push_argument_section(&mut out, "Arguments", &view.args);
+    push_argument_section(&mut out, "Options", &view.options);
+
+    out.push_str("\nReturns:\n");
+    out.push_str("  ");
+    out.push_str(view.returns.return_type.as_str());
+    if !view.returns.description.is_empty() {
+        out.push_str("  ");
+        out.push_str(view.returns.description.as_str());
+    }
+    out.push('\n');
+
+    if !view.examples.is_empty() {
+        out.push_str("\nExamples:\n");
+        for example in &view.examples {
+            out.push_str("  ");
+            out.push_str(example.as_str());
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+pub(super) fn render_tool_help_markdown(view: &ToolInfoView) -> String {
+    let mut out = String::new();
+    out.push_str("# ");
+    out.push_str(view.name.as_str());
+    out.push_str("\n\n");
+    out.push_str(view.description.as_str());
+    out.push_str("\n\n");
+    out.push_str("## Usage\n\n");
+    out.push_str("```text\n");
+    out.push_str("openwalk exec ");
+    out.push_str(view.usage.as_str());
+    out.push_str("\n```\n");
+
+    push_markdown_argument_section(&mut out, "Arguments", &view.args);
+    push_markdown_argument_section(&mut out, "Options", &view.options);
+
+    out.push_str("\n## Returns\n\n");
+    out.push_str("- `");
+    out.push_str(view.returns.return_type.as_str());
+    out.push_str("`: ");
+    out.push_str(view.returns.description.as_str());
+    out.push('\n');
+
+    if !view.examples.is_empty() {
+        out.push_str("\n## Examples\n\n");
+        out.push_str("```text\n");
+        for example in &view.examples {
+            out.push_str(example.as_str());
+            out.push('\n');
+        }
+        out.push_str("```\n");
+    }
+
+    out
+}
+
+fn push_argument_section(out: &mut String, title: &str, args: &[ToolArgument]) {
+    if args.is_empty() {
+        return;
+    }
+
+    out.push('\n');
+    out.push_str(title);
+    out.push_str(":\n");
+    let name_width = args
+        .iter()
+        .map(|arg| help_arg_label(arg).chars().count())
+        .max()
+        .unwrap_or(0);
+    for arg in args {
+        let label = help_arg_label(arg);
+        out.push_str("  ");
+        out.push_str(label.as_str());
+        out.push_str(&" ".repeat(name_width.saturating_sub(label.chars().count()) + 2));
+        out.push_str(arg.description.as_str());
+        out.push('\n');
+    }
+}
+
+fn push_markdown_argument_section(out: &mut String, title: &str, args: &[ToolArgument]) {
+    if args.is_empty() {
+        return;
+    }
+
+    out.push_str("\n## ");
+    out.push_str(title);
+    out.push_str("\n\n");
+    for arg in args {
+        out.push_str("- `");
+        out.push_str(help_arg_label(arg).as_str());
+        out.push_str("`: ");
+        out.push_str(arg.description.as_str());
+        out.push('\n');
+    }
+}
+
+fn help_arg_label(arg: &ToolArgument) -> String {
+    if arg.name.starts_with('-') {
+        arg.name.clone()
+    } else if arg.required {
+        format!("<{}>", arg.name)
+    } else {
+        format!("[{}]", arg.name)
     }
 }
 

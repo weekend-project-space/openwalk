@@ -2,47 +2,38 @@
 
 Turn websites into reusable local commands.
 
-OpenWalk is a local-first CLI that brings website capabilities, real-browser automation, and project tools together behind a single entry point. Search, trending feeds, page actions, and workflow orchestration no longer have to live as throwaway scripts. They become commands you can reuse, refine, and build on over time.
+OpenWalk is a local-first CLI for running website tools, built-in browser automation, and local Scheme tools behind one entry point:
 
 ```bash
+openwalk exec <tool> [args...]
+```
+
+Use it when a website workflow should stop being a one-off script and become something you can run, inspect, reuse, and hand to an agent.
+
+```bash
+openwalk exec openwalkhub/tools
+openwalk tool ls
+
 openwalk exec bing/search "Claude Code" 5
 openwalk exec reddit/hot LocalLLaMA
 openwalk exec v2ex/hot
-openwalk exec openwalkhub/tools
 
 openwalk exec browser-open https://news.ycombinator.com -s=demo
 openwalk exec page-snapshot -s=demo
+openwalk exec browser-close -s=demo
 ```
 
-What you get back is not a pile of scattered text, but structured output that is much easier to keep processing:
+If a hub tool is not installed yet, `openwalk exec` can fetch it into the current project and run it immediately.
 
-```json
-{
-  "query": "Claude Code",
-  "count": 5,
-  "results": [
-    {
-      "index": 1,
-      "title": "...",
-      "url": "..."
-    }
-  ]
-}
-```
+## Why OpenWalk
 
-If a tool is not installed yet, `openwalk exec` can fetch it from the hub into your current project and run it immediately.
+- Turn website capabilities into commands instead of throwaway scripts
+- Use a real local browser when scraping is not enough
+- Reuse local login state, browser profiles, files, and environment
+- Give humans and AI agents the same stable execution surface
+- Keep tool output structured so it is easier to inspect and pipe into follow-up work
 
-## Why You Will Want To Keep Using It
-
-- Turn website capabilities into commands instead of one-off scripts
-- Use a real browser for automation instead of stopping at offline scraping
-- Stay local-first so your login state, files, and local environment are easier to reuse
-- Friendly for humans and for AI agents
-- Run ready-made tools right away, and grow custom tools into long-term team assets
-
-## Get Started In 30 Seconds
-
-### 1. Install
+## Install
 
 ```bash
 # Linux
@@ -54,13 +45,21 @@ curl -fsSL https://raw.githubusercontent.com/weekend-project-space/openwalk/main
 iex "& { $(irm https://raw.githubusercontent.com/weekend-project-space/openwalk/main/scripts/install.ps1) }"
 ```
 
-### 2. Initialize the current project
+## Quick Start
+
+List tools that are available locally:
 
 ```bash
-openwalk init
+openwalk tool ls
 ```
 
-### 3. Run your first command
+Discover hub tools:
+
+```bash
+openwalk exec openwalkhub/tools
+```
+
+Run a website command:
 
 ```bash
 openwalk exec bing/search "OpenAI" 5
@@ -68,7 +67,19 @@ openwalk exec reddit/hot LocalLLaMA
 openwalk exec v2ex/hot
 ```
 
-### 4. Open a real browser session
+Inspect a tool before running it:
+
+```bash
+openwalk exec browser-open --help
+openwalk tool info browser-open
+openwalk tool info browser-open --format=json
+```
+
+`openwalk exec <tool> --help` and `openwalk tool info <tool>` show the same human-readable help by default. Use `--format=json` with `tool info` when you need structured metadata.
+
+## Browser Automation
+
+Open a browser session, run page commands against it, then close it:
 
 ```bash
 openwalk exec browser-open https://example.com -s=demo --headed
@@ -76,22 +87,18 @@ openwalk exec page-snapshot -s=demo
 openwalk exec browser-close -s=demo
 ```
 
-## One Entry Point For Three Kinds Of Capabilities
+`browser-open` supports:
 
-### Ready-made website commands
+```bash
+openwalk exec browser-open https://example.com -s=demo
+openwalk exec browser-open https://example.com -s=demo --headed
+openwalk exec browser-open https://example.com -s=demo --new-tab
+openwalk exec browser-open https://example.com -s=demo --profile /tmp/openwalk-profile
+```
 
-Turn common website actions into stable commands:
+The default browser mode is headless. Use `--headed` when you want to see the browser UI.
 
-- `bing/search`
-- `reddit/hot`
-- `v2ex/hot`
-- Plus more `search`, `hot`, `detail`, `comments`, and `download` style tools from the hub
-
-These commands work well both for direct human use and for plugging into scripts, pipelines, and agent workflows.
-
-### Built-in browser primitives
-
-OpenWalk includes a set of browser capabilities you can call directly:
+Useful built-in browser tools include:
 
 - `browser-open`
 - `page-goto`
@@ -104,83 +111,53 @@ OpenWalk includes a set of browser capabilities you can call directly:
 - `tab-close`
 - `browser-close`
 
-You can use these capabilities directly, or compose them into your own website workflows step by step.
+## Core Commands
 
-### Project-level and global tools
+| Command | Example | Purpose |
+| ------- | ------- | ------- |
+| `exec` | `openwalk exec browser-open https://example.com` | Run a built-in tool, local script, workspace/global tool, or hub tool |
+| `install` | `openwalk install` | Install tools declared by the current project |
+| `tool ls` | `openwalk tool ls` | List directly runnable tools |
+| `tool info` | `openwalk tool info browser-open` | Show usage, arguments, options, returns, and examples |
+| `exec --help` | `openwalk exec browser-open --help` | Show tool help without running the tool |
 
-OpenWalk is not only for running prebuilt commands. It also helps you turn capabilities into long-term reusable tools:
+`exec` is the main path. It resolves tools in this order: local script, workspace tool, built-in host function, global tool, then hub auto-install into the current project.
 
-- Workspace tools
-- Global tools
-- Tools pulled from the hub
-- Local `.scm` scripts
+## Hub Tools
 
-Temporary scripts do not have to stay temporary forever. They can gradually grow into tools your team actually reuses.
+OpenWalk can pull reusable website tools from `openwalkhub`. Start with:
 
-## What `openwalkhub` Currently Supports
+```bash
+openwalk exec openwalkhub/tools
+```
 
-OpenWalk can pull tools from `openwalkhub` into the current project at execution time. The table below was last updated on `2026-05-13`.
+Examples of useful hub-style commands include:
 
-| Site / Category | Available Commands                                                                                  |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `openwalkhub`   | `tools`                                                                                             |
-| `bilibili`      | `comments` `feed` `history` `me` `opus` `popular` `ranking` `search` `trending` `user-opus` `video` |
-| `bing`          | `search`                                                                                            |
-| `csdn`          | `search`                                                                                            |
-| `debug`         | `current-page` `open`                                                                               |
-| `devto`         | `search`                                                                                            |
-| `douban`        | `movie-top250` `search`                                                                             |
-| `github`        | `fork` `issue-create` `issues` `me` `pr-create` `repo`                                              |
-| `hackernews`    | `thread` `top`                                                                                      |
-| `hupu`          | `hot`                                                                                               |
-| `jike`          | `latest` `search` `tag` `topic`                                                                     |
-| `linkedin`      | `profile` `search`                                                                                  |
-| `linuxdo`       | `hot` `latest` `topic`                                                                              |
-| `producthunt`   | `today`                                                                                             |
-| `reddit`        | `context` `hot` `me` `posts` `search` `thread`                                                      |
-| `stackoverflow` | `search`                                                                                            |
-| `twitter`       | `bookmarks` `following` `for_you` `notifications` `search` `thread` `tweets` `user`                 |
-| `v2ex`          | `hot` `latest` `topic`                                                                              |
-| `weibo`         | `hot` `search`                                                                                      |
-| `xiaohongshu`   | `note` `search`                                                                                     |
-| `xiaoyuzhoufm`  | `episode` `podcast`                                                                                 |
-| `youtube`       | `channel` `comments` `feed` `search` `transcript` `video`                                           |
-| `zhihu`         | `hot` `question` `search`                                                                           |
+- Search: `bing/search`, `reddit/search`, `youtube/search`, `zhihu/search`
+- Timelines and trends: `reddit/hot`, `v2ex/hot`, `linuxdo/hot`, `hackernews/top`
+- Detail pages: `v2ex/topic`, `zhihu/question`, `hackernews/thread`, `reddit/thread`
+- Account or platform workflows: `github/issues`, `twitter/bookmarks`, `linkedin/profile`
 
-Some of the best commands to show new users right away include:
+Availability changes over time, so prefer `openwalk exec openwalkhub/tools` for the current list.
 
-- Trending and timelines: `reddit/hot` `v2ex/hot` `linuxdo/hot` `weibo/hot` `zhihu/hot` `hackernews/top` `producthunt/today`
-- Search: `bing/search` `reddit/search` `twitter/search` `youtube/search` `zhihu/search` `stackoverflow/search`
-- Detail and content reading: `v2ex/topic` `zhihu/question` `hackernews/thread` `reddit/thread` `youtube/video` `youtube/transcript`
-- Platform and account data: `github/me` `github/issues` `twitter/bookmarks` `twitter/notifications` `linkedin/profile`
+## For Humans And Agents
 
-## For Humans And For AI Agents
+For humans, OpenWalk turns repeated website work into commands you can remember and improve.
 
-### For humans
+For agents, OpenWalk provides a stable local action surface:
 
-When you want to turn repetitive website actions into stable commands, OpenWalk feels very natural:
-
-- `openwalk exec openwalkhub/tools` to see what tools are available on the hub
-- `openwalk tool list` to see what you can run right now
-- `openwalk tool info bing/search` to check how a specific tool works
-- Run ready-made website commands directly instead of reopening sites and clicking through them every time
-
-### For AI agents
-
-If you want a stable execution surface for an AI agent, OpenWalk is a natural fit:
-
-- Agents can call ready-made commands instead of rediscovering websites from scratch every time
-- Browser capabilities can reuse the real local environment
-- Structured output is easier to feed into downstream reasoning, extraction, and orchestration
-- A website flow explored once can become a command that runs directly next time
+- Tool help is discoverable with `openwalk exec <tool> --help`
+- Tool metadata is available with `openwalk tool info <tool> --format=json`
+- Browser commands reuse the real local environment
+- Structured outputs are easier to feed into reasoning, extraction, and orchestration
 
 ## Continue From Here
 
 ```bash
 openwalk exec openwalkhub/tools
-openwalk tool list
+openwalk tool ls
+openwalk exec browser-open --help
 openwalk tool info bing/search
-openwalk tool info browser-open
 ```
 
 For the full manual, installation details, tool authoring, environment variables, and directory structure, see [GUIDE.md](./GUIDE.md).

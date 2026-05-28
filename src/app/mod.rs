@@ -11,17 +11,18 @@ mod types;
 use anyhow::Result;
 
 use crate::{
+    app::{exec::exec_tool, install::install_workspace_tools},
     cli::{Cli, Command, ToolCommand},
     workspace::{GlobalHome, Workspace},
 };
 
-use exec::{exec_tool, run_local};
+// use exec::{exec_tool, run_local};
 use info::show_tool_info;
-use init::init_workspace;
-use install::{
-    install_global_package, install_package, install_workspace_tools, uninstall_global_package,
-    uninstall_package,
-};
+// use init::init_workspace;
+// use install::{
+//     install_global_package, install_package, install_workspace_tools, uninstall_global_package,
+//     uninstall_package,
+// };
 use list::list_tools;
 
 #[cfg(test)]
@@ -36,7 +37,11 @@ use crate::{
 };
 
 #[cfg(test)]
+use exec::run_local;
+#[cfg(test)]
 use info::{build_builtin_tool_info, build_tool_info_view, load_tool_info};
+#[cfg(test)]
+use install::{install_global_package, install_package, uninstall_package};
 #[cfg(test)]
 use list::{render_tool_list_lines, workspace_tool_entries};
 #[cfg(test)]
@@ -50,15 +55,15 @@ pub async fn run(cli: Cli) -> Result<()> {
     // The app layer owns command dispatch so CLI parsing, persistence, and execution policy
     // stay separated.
     match cli.command {
-        Command::Init(args) => {
-            let workspace = Workspace::discover()?;
-            init_workspace(&workspace, args)
-        }
+        // Command::Init(args) => {
+        //     let workspace = Workspace::discover()?;
+        //     init_workspace(&workspace, args)
+        // }
         Command::Install(args) => {
             let workspace = Workspace::discover()?;
             install_workspace_tools(&workspace, args)
         }
-        Command::Run(args) => run_local(args).await,
+        // Command::Run(args) => run_local(args).await,
         Command::Exec(args) => {
             let workspace = Workspace::discover()?;
             let global_home = GlobalHome::discover()?;
@@ -78,11 +83,11 @@ fn handle_tool_command(
     command: ToolCommand,
 ) -> Result<()> {
     match command {
-        ToolCommand::Add { package } => install_package(workspace, package),
-        ToolCommand::Remove { package } => uninstall_package(workspace, package),
-        ToolCommand::Install { package } => install_global_package(global_home, package),
-        ToolCommand::Uninstall { package } => uninstall_global_package(global_home, package),
-        ToolCommand::List { format } => list_tools(workspace, global_home, format),
+        // ToolCommand::Add { package } => install_package(workspace, package),
+        // ToolCommand::Remove { package } => uninstall_package(workspace, package),
+        // ToolCommand::Install { package } => install_global_package(global_home, package),
+        // ToolCommand::Uninstall { package } => uninstall_global_package(global_home, package),
+        ToolCommand::Ls { format } => list_tools(workspace, global_home, format),
         ToolCommand::Info { tool, format } => show_tool_info(workspace, global_home, tool, format),
     }
 }

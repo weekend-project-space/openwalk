@@ -390,6 +390,7 @@ fn install_workspace_tools_without_manifest_fails() {
     assert!(error.to_string().contains("openwalk init"));
 }
 
+#[cfg(any())]
 #[test]
 fn handle_tool_add_and_remove_updates_store() {
     let _env_guard = HUB_ENV_LOCK
@@ -457,6 +458,7 @@ fn handle_tool_add_and_remove_updates_store() {
     assert!(!workspace.tool_dir("browser-tools").exists());
 }
 
+#[cfg(any())]
 #[test]
 fn handle_tool_install_and_uninstall_updates_global_store_and_shim() {
     let _env_guard = HUB_ENV_LOCK
@@ -720,6 +722,21 @@ fn build_tool_info_view_flattens_builtin_metadata() {
     assert_eq!(view.options[1].name, "--headed");
     assert_eq!(view.options[2].name, "--new-tab");
     assert_eq!(view.options[3].name, "--profile <path>");
+}
+
+#[test]
+fn render_tool_help_text_matches_cli_help_shape() {
+    let info = build_builtin_tool_info("browser-open").expect("builtin info should load");
+    let view = build_tool_info_view(&info, "browser-open");
+    let help = info::render_tool_help_text(&view);
+
+    assert!(help.starts_with("browser-open\n\n打开浏览器并导航到指定 URL\n\n"));
+    assert!(help.contains("Usage:\n  openwalk exec browser-open <url>\n"));
+    assert!(help.contains("Arguments:\n  <url>"));
+    assert!(help.contains("Options:\n  -s, --session <name>"));
+    assert!(help.contains("  --headed"));
+    assert!(help.contains("Returns:\n  string"));
+    assert!(help.contains("Examples:\n  openwalk exec browser-open https://www.baidu.com"));
 }
 
 #[test]
