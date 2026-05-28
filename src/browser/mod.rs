@@ -5,6 +5,7 @@ mod dom;
 mod emulation;
 mod input;
 mod network;
+mod open;
 mod page;
 mod performance;
 mod runtime;

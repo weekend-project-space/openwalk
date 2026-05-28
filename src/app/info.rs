@@ -1,0 +1,190 @@
+use std::path::PathBuf;
+
+use anyhow::{bail, Result};
+
+use crate::{
+    builtin_tools,
+    output::parse_output_format,
+    tool_metadata::{load_tool_metadata, ToolArgument},
+    workspace::{GlobalHome, Workspace},
+};
+
+use super::{
+    list::print_tool_output,
+    presentation::{tool_usage_from_metadata, trim_tool_description},
+    target::{
+        package_exists, resolve_global_tool_target, resolve_script_target,
+        resolve_workspace_tool_target, tool_exists,
+    },
+    types::{ToolInfoEntry, ToolInfoView},
+};
+
+pub(super) fn show_tool_info(
+    workspace: &Workspace,
+    global_home: &GlobalHome,
+    target: String,
+    format: String,
+) -> Result<()> {
+    let output_format = parse_output_format(&format)?;
+    let info = load_tool_info(workspace, global_home, &target)?;
+    let view = build_tool_info_view(&info, &target);
+    let tool_name = view.name.clone();
+    print_tool_output(
+        output_format,
+        "tool-info",
+        Some(tool_name.as_str()),
+        serde_json::to_value(view)?,
+    )
+}
+
+pub(super) fn build_tool_info_view(info: &ToolInfoEntry, target: &str) -> ToolInfoView {
+    let metadata = &info.metadata;
+    let usage_name = if info.source == "script-path" {
+        target
+    } else {
+        metadata.name.as_str()
+    };
+
+    ToolInfoView {
+        name: metadata.name.clone(),
+        usage: tool_usage_from_metadata(usage_name, &metadata.args),
+        description: trim_tool_description(metadata.description.as_str()),
+        source: display_tool_source(info.source.as_str()),
+        script: info.script.clone(),
+        args: metadata.args.clone(),
+        options: tool_info_options(info.source.as_str(), metadata.name.as_str()),
+        returns: metadata.returns.clone(),
+        examples: metadata.examples.clone(),
+        domains: metadata.domains.clone(),
+        read_only: metadata.read_only,
+        requires_login: metadata.requires_login,
+        tags: metadata.tags.clone(),
+    }
+}
+
+fn display_tool_source(source: &str) -> String {
+    match source {
+        "host-function" => "builtin".to_string(),
+        "workspace-tool" => "workspace".to_string(),
+        "global-tool" => "global".to_string(),
+        "script-path" => "script".to_string(),
+        _ => source.to_string(),
+    }
+}
+
+fn tool_info_options(source: &str, name: &str) -> Vec<ToolArgument> {
+    let mut options = Vec::new();
+
+    if source == "host-function" && name != "browser-list" && is_browser_tool_name(name) {
+        options.push(tool_option(
+            "-s, --session <name>",
+            "string",
+            "指定浏览器会话名称",
+        ));
+    }
+
+    if name == "browser-open" {
+        options.push(tool_option("--headed", "bool", "以有界面模式打开浏览器"));
+        options.push(tool_option("--new-tab", "bool", "在现有会话中打开新标签页"));
+        options.push(tool_option(
+            "--profile <path>",
+            "string",
+            "指定浏览器 profile 目录",
+        ));
+    }
+
+    options
+}
+
+fn tool_option(name: &str, arg_type: &str, description: &str) -> ToolArgument {
+    ToolArgument {
+        name: name.to_string(),
+        arg_type: arg_type.to_string(),
+        required: false,
+        default: None,
+        description: description.to_string(),
+    }
+}
+
+fn is_browser_tool_name(name: &str) -> bool {
+    name != "openwalk-output-format"
+        && (name.starts_with("browser-")
+            || name.starts_with("page-")
+            || name.starts_with("element-")
+            || name.starts_with("keyboard-")
+            || name.starts_with("mouse-")
+            || name.starts_with("touch-")
+            || name.starts_with("tab-")
+            || name.starts_with("network-")
+            || name.starts_with("console")
+            || name.starts_with("inspect-")
+            || name.starts_with("tracing-")
+            || name.starts_with("device-")
+            || name.starts_with("localstorage-")
+            || name.starts_with("sessionstorage-")
+            || name.starts_with("cookie-")
+            || name.starts_with("js-")
+            || name.starts_with("time-")
+            || name.starts_with("cdp-"))
+}
+
+pub(super) fn load_tool_info(
+    workspace: &Workspace,
+    global_home: &GlobalHome,
+    target: &str,
+) -> Result<ToolInfoEntry> {
+    if let Some(script_path) = resolve_script_target(target)? {
+        return build_tool_info("script-path", script_path);
+    }
+
+    if let Some(script_path) = resolve_workspace_tool_target(workspace, target)? {
+        return build_tool_info("workspace-tool", script_path);
+    }
+
+    if tool_exists(target) {
+        return build_builtin_tool_info(target);
+    }
+
+    if let Some(script_path) = resolve_global_tool_target(global_home, target)? {
+        return build_tool_info("global-tool", script_path);
+    }
+
+    if package_exists(&workspace.load_tools_or_default()?, target) {
+        bail!(
+            "tool `{target}` is registered in the workspace, but no script entry was found at {}",
+            workspace.tool_entry_path(target).display()
+        );
+    }
+
+    if package_exists(&global_home.load_tools()?, target) {
+        bail!(
+            "tool `{target}` is registered globally, but no script entry was found at {}",
+            global_home.tool_entry_path(target).display()
+        );
+    }
+
+    bail!(
+        "tool `{target}` was not found. Pass a local script path like `./demo.scm` or an installed tool ref"
+    );
+}
+
+fn build_tool_info(source: &str, script_path: PathBuf) -> Result<ToolInfoEntry> {
+    let metadata = load_tool_metadata(&script_path)?;
+    Ok(ToolInfoEntry {
+        name: metadata.name.clone(),
+        source: source.to_string(),
+        script: Some(script_path.display().to_string()),
+        metadata,
+    })
+}
+
+pub(super) fn build_builtin_tool_info(name: &str) -> Result<ToolInfoEntry> {
+    let metadata = builtin_tools::builtin_tool_metadata(name)
+        .ok_or_else(|| anyhow::anyhow!("builtin host function `{name}` was not found"))?;
+    Ok(ToolInfoEntry {
+        name: metadata.name.clone(),
+        source: "host-function".to_string(),
+        script: None,
+        metadata,
+    })
+}

@@ -30,6 +30,7 @@ pub struct EphemeralLaunchOptions {
 pub enum BrowserCommand {
     Open {
         url: String,
+        new_tab: bool,
     },
     Goto {
         url: String,

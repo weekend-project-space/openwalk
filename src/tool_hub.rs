@@ -88,6 +88,7 @@ pub fn install_tool_from_hub(package: &str, destination_dir: &Path) -> Result<Pa
 }
 
 fn clone_hub_repo(config: &ToolHubConfig, checkout_dir: &Path) -> Result<()> {
+    let checkout_parent = checkout_dir.parent().unwrap_or_else(|| Path::new("."));
     let output = Command::new("git")
         .arg("clone")
         .arg("--depth")
@@ -96,6 +97,7 @@ fn clone_hub_repo(config: &ToolHubConfig, checkout_dir: &Path) -> Result<()> {
         .arg(&config.git_ref)
         .arg(&config.git_url)
         .arg(checkout_dir)
+        .current_dir(checkout_parent)
         .output()
         .context("failed to launch `git clone` for the openwalk tool hub")?;
 

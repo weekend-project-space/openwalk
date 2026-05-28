@@ -112,7 +112,7 @@ impl BrowserActor {
 
     async fn handle(&mut self, command: BrowserCommand) -> Result<BrowserValue> {
         match command {
-            BrowserCommand::Open { url } => self.open(url).await,
+            BrowserCommand::Open { url, new_tab } => self.open(url, new_tab).await,
             BrowserCommand::Goto { url } => self.goto(url).await,
             BrowserCommand::Back => self.back().await,
             BrowserCommand::Forward => self.forward().await,

@@ -14,13 +14,9 @@ use chromiumoxide::{detection::DetectionOptions, handler::HandlerConfig, Browser
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::{browser::types::BrowserLaunchMode, workspace::GlobalHome};
+use crate::workspace::GlobalHome;
 
-use super::{
-    actor::BrowserActor,
-    types::BrowserValue,
-    util::{browser_request_timeout, env_flag_is_truthy, session_connect_timeout},
-};
+use super::util::{browser_request_timeout, env_flag_is_truthy, session_connect_timeout};
 
 const SESSION_FILE: &str = "session.json";
 const SESSION_LOG_FILE: &str = "browser.log";
@@ -46,14 +42,12 @@ pub struct BrowserSessionState {
 pub struct BrowserSessionHandle {
     manifest_path: PathBuf,
     state: BrowserSessionState,
-    new_tab: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BrowserSessionLaunchOptions {
     pub requested_headless: Option<bool>,
     pub requested_profile_dir: Option<PathBuf>,
-    pub new_tab: bool,
 }
 
 impl BrowserSessionHandle {
@@ -99,7 +93,6 @@ pub async fn attach_browser_session_with_options(
     let BrowserSessionLaunchOptions {
         requested_headless,
         requested_profile_dir,
-        new_tab,
     } = options;
 
     validate_session_name(session_name)?;
@@ -110,7 +103,7 @@ pub async fn attach_browser_session_with_options(
         .map(normalize_profile_dir)
         .transpose()?;
 
-    let mut handle = load_state(global_home, session_name, new_tab)?
+    let mut handle = load_state(global_home, session_name)?
         .ok_or_else(|| anyhow!("browser session `{session_name}` is not found"))?;
 
     if let Some((browser, handler)) = try_connect_session(handle.http_url()).await? {
@@ -142,7 +135,6 @@ pub async fn start_browser_session(
     let BrowserSessionLaunchOptions {
         requested_headless,
         requested_profile_dir,
-        new_tab,
     } = options;
 
     validate_session_name(session_name)?;
@@ -151,7 +143,7 @@ pub async fn start_browser_session(
     let profile_dir =
         resolve_session_profile_dir(global_home, session_name, requested_profile_dir.as_deref())?;
 
-    if let Some(mut handle) = load_state(global_home, session_name, new_tab)? {
+    if let Some(mut handle) = load_state(global_home, session_name)? {
         if let Some((browser, handler)) = try_connect_session(handle.http_url()).await? {
             if let Some(requested_headless) = requested_headless {
                 ensure_session_headless_matches(&handle, requested_headless)?;
@@ -212,7 +204,6 @@ pub async fn start_browser_session(
     Ok(BrowserSessionHandle {
         manifest_path,
         state,
-        new_tab,
     })
 }
 
@@ -394,7 +385,6 @@ pub fn list_browser_sessions(global_home: &GlobalHome) -> Result<Vec<String>> {
 fn load_state(
     global_home: &GlobalHome,
     session_name: &str,
-    new_tab: bool,
 ) -> Result<Option<BrowserSessionHandle>> {
     let manifest_path = session_manifest_path(global_home, session_name);
     if !manifest_path.exists() {
@@ -408,7 +398,6 @@ fn load_state(
     Ok(Some(BrowserSessionHandle {
         manifest_path,
         state,
-        new_tab,
     }))
 }
 
@@ -689,74 +678,6 @@ fn unix_timestamp_now() -> Result<u64> {
         .duration_since(UNIX_EPOCH)
         .context("system clock is before unix epoch")?
         .as_secs())
-}
-
-impl BrowserActor {
-    pub(super) async fn open(&mut self, url: String) -> Result<BrowserValue> {
-        let new_tab = if let BrowserLaunchMode::Session(h) = &self.mode {
-            h.new_tab
-        } else {
-            false
-        };
-        if !new_tab {
-            if self.browser.is_some() || !self.pages.is_empty() {
-                bail!("browser is already open; call `browser-close` before `browser-open`");
-            }
-        }
-
-        self.ensure_browser_launched().await?;
-        if self.has_single_placeholder_page().await? {
-            if let Some(page) = self.pages.pop() {
-                let page_id = page.target_id().as_ref().to_string();
-                let _ = page.close().await;
-                self.observed_network_targets.remove(page_id.as_str());
-                self.clear_console_page_state(page_id.as_str());
-            }
-            self.active_page = None;
-            self.persist_current_active_page().ok();
-        }
-
-        if !self.pages.is_empty() && !new_tab {
-            bail!("browser is already open; call `browser-close` before `browser-open`");
-        }
-
-        let browser = self.browser.as_ref().expect("browser should be available");
-        let page = browser
-            .new_page("about:blank")
-            .await
-            .context("failed to create a fresh browser page")?;
-        self.ensure_network_tracking_for_page(page.clone()).await?;
-        self.ensure_console_tracking_for_page(page.clone()).await?;
-
-        self.pages.push(page.clone());
-        self.active_page = Some(self.pages.len() - 1);
-        page.bring_to_front().await.ok();
-        self.persist_current_active_page().ok();
-        let final_url = super::page::navigate_page_to_url(&page, url.as_str()).await?;
-
-        // page.goto(url.as_str())
-        //     .await
-        //     .with_context(|| format!("failed to open a new page for `{url}`"))?;
-        Ok(BrowserValue::String(
-            page.get_title().await?.unwrap_or(final_url),
-        ))
-    }
-
-    async fn has_single_placeholder_page(&self) -> Result<bool> {
-        if self.pages.len() != 1 {
-            return Ok(false);
-        }
-
-        let page = self
-            .pages
-            .first()
-            .expect("single-page check should guarantee a page exists");
-        let current_url = page.url().await.unwrap_or(None).unwrap_or_default();
-        Ok(matches!(
-            current_url.as_str(),
-            "" | "about:blank" | "chrome://newtab/" | "chrome://new-tab-page/"
-        ))
-    }
 }
 
 #[cfg(test)]
