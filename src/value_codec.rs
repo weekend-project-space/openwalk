@@ -143,6 +143,10 @@ fn list_or_pair_to_json(value: &Value) -> serde_json::Value {
 fn maybe_alist_to_json_object(
     items: &[Value],
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if items.is_empty() {
+        return None;
+    }
+
     let mut map = serde_json::Map::new();
     for item in items {
         let Value::Pair(entry) = item else {

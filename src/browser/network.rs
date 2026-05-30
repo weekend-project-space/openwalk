@@ -1,7 +1,6 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chromiumoxide::cdp::browser_protocol::network::{
     EnableParams, EventLoadingFailed, EventLoadingFinished, EventRequestWillBeSent,
-    EventResponseReceived, GetResponseBodyParams,
+    EventResponseReceived,
 };
 
 use super::{
@@ -11,8 +10,6 @@ use super::{
     *,
 };
 
-const NETWORK_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
-const NETWORK_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const NETWORK_TOTAL_BUFFER_SIZE: i64 = 50 * 1024 * 1024;
 const NETWORK_RESOURCE_BUFFER_SIZE: i64 = 5 * 1024 * 1024;
 
@@ -121,127 +118,27 @@ impl BrowserActor {
         Ok(())
     }
 
-    pub(super) async fn network_log(&mut self) -> Result<BrowserValue> {
+    pub(super) async fn network_log(
+        &mut self,
+        url_contains: Option<String>,
+    ) -> Result<BrowserValue> {
         let page = self.ensure_active_page().await?;
         self.ensure_network_tracking_for_page(page.clone()).await?;
         let page_id = page.target_id().as_ref().to_string();
-        let entries = self.network_page_entries(page_id.as_str())?;
+        let entries = self.network_page_entries(page_id.as_str(), url_contains.as_deref())?;
         serialize_to_browser_value(&entries, "failed to serialize network log")
     }
 
-    pub(super) async fn network_wait_response(
-        &mut self,
-        url_contains: String,
-    ) -> Result<BrowserValue> {
-        let page = self.ensure_active_page().await?;
-        self.ensure_network_tracking_for_page(page.clone()).await?;
-        let page_id = page.target_id().as_ref().to_string();
-        let deadline = Instant::now() + NETWORK_WAIT_TIMEOUT;
-
-        while Instant::now() < deadline {
-            if let Some(entry) =
-                self.latest_network_entry(page_id.as_str(), url_contains.as_str())?
-            {
-                if entry.response.is_some() {
-                    return serialize_to_browser_value(
-                        &entry,
-                        "failed to serialize network response",
-                    );
-                }
-            }
-            sleep(NETWORK_POLL_INTERVAL).await;
-        }
-
-        if let Some(entry) =
-            self.latest_failed_network_entry(page_id.as_str(), url_contains.as_str())?
-        {
-            let reason = entry
-                .failure_text
-                .unwrap_or_else(|| "request failed before a response was received".to_string());
-            bail!("request matching `{url_contains}` failed: {reason}");
-        }
-
-        bail!("timed out waiting for response url to contain `{url_contains}`")
-    }
-
-    pub(super) async fn network_response_body(
-        &mut self,
-        url_contains: String,
-    ) -> Result<BrowserValue> {
-        let page = self.ensure_active_page().await?;
-        self.ensure_network_tracking_for_page(page.clone()).await?;
-        let page_id = page.target_id().as_ref().to_string();
-        let deadline = Instant::now() + NETWORK_WAIT_TIMEOUT;
-
-        while Instant::now() < deadline {
-            if let Some(entry) =
-                self.latest_completed_network_entry(page_id.as_str(), url_contains.as_str())?
-            {
-                let response = page
-                    .execute(GetResponseBodyParams::new(entry.request_id.clone()))
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "failed to read response body for request matching `{url_contains}`"
-                        )
-                    })?;
-                let body =
-                    decode_response_body(response.result.body, response.result.base64_encoded)?;
-                return Ok(BrowserValue::String(body));
-            }
-            sleep(NETWORK_POLL_INTERVAL).await;
-        }
-
-        if let Some(entry) =
-            self.latest_failed_network_entry(page_id.as_str(), url_contains.as_str())?
-        {
-            let reason = entry.failure_text.unwrap_or_else(|| {
-                "request failed before the response body was available".to_string()
-            });
-            bail!("request matching `{url_contains}` failed: {reason}");
-        }
-
-        bail!("timed out waiting for response body for url containing `{url_contains}`")
-    }
-
-    fn network_page_entries(&self, page_id: &str) -> Result<Vec<NetworkEntry>> {
-        let state = self
-            .network_state
-            .lock()
-            .map_err(|_| anyhow!("network log is not available"))?;
-        Ok(state.page_entries(page_id))
-    }
-
-    fn latest_network_entry(&self, page_id: &str, fragment: &str) -> Result<Option<NetworkEntry>> {
-        let state = self
-            .network_state
-            .lock()
-            .map_err(|_| anyhow!("network log is not available"))?;
-        Ok(state.latest_matching_entry(page_id, fragment))
-    }
-
-    fn latest_completed_network_entry(
+    fn network_page_entries(
         &self,
         page_id: &str,
-        fragment: &str,
-    ) -> Result<Option<NetworkEntry>> {
+        url_contains: Option<&str>,
+    ) -> Result<Vec<NetworkEntry>> {
         let state = self
             .network_state
             .lock()
             .map_err(|_| anyhow!("network log is not available"))?;
-        Ok(state.latest_completed_entry(page_id, fragment))
-    }
-
-    fn latest_failed_network_entry(
-        &self,
-        page_id: &str,
-        fragment: &str,
-    ) -> Result<Option<NetworkEntry>> {
-        let state = self
-            .network_state
-            .lock()
-            .map_err(|_| anyhow!("network log is not available"))?;
-        Ok(state.latest_failed_entry(page_id, fragment))
+        Ok(state.page_entries(page_id, url_contains))
     }
 }
 
@@ -316,44 +213,17 @@ impl NetworkState {
         page_entry.failure_text = Some(event.error_text);
     }
 
-    fn page_entries(&self, page_id: &str) -> Vec<NetworkEntry> {
+    fn page_entries(&self, page_id: &str, url_contains: Option<&str>) -> Vec<NetworkEntry> {
         self.entries
             .iter()
-            .filter(|entry| entry.page_id == page_id)
+            .filter(|entry| {
+                entry.page_id == page_id
+                    && url_contains
+                        .map(|fragment| entry_matches(entry, fragment))
+                        .unwrap_or(true)
+            })
             .cloned()
             .collect()
-    }
-
-    fn latest_matching_entry(&self, page_id: &str, fragment: &str) -> Option<NetworkEntry> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|entry| entry.page_id == page_id && entry_matches(entry, fragment))
-            .cloned()
-    }
-
-    fn latest_completed_entry(&self, page_id: &str, fragment: &str) -> Option<NetworkEntry> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|entry| {
-                entry.page_id == page_id
-                    && entry.finished
-                    && !entry.failed
-                    && entry.response.is_some()
-                    && entry_matches(entry, fragment)
-            })
-            .cloned()
-    }
-
-    fn latest_failed_entry(&self, page_id: &str, fragment: &str) -> Option<NetworkEntry> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|entry| {
-                entry.page_id == page_id && entry.failed && entry_matches(entry, fragment)
-            })
-            .cloned()
     }
 
     fn entry_mut(
@@ -379,21 +249,6 @@ impl NetworkState {
         });
         self.entry_index.insert(key, index);
         &mut self.entries[index]
-    }
-}
-
-fn decode_response_body(body: String, base64_encoded: bool) -> Result<String> {
-    if !base64_encoded {
-        return Ok(body);
-    }
-
-    let decoded = STANDARD
-        .decode(body.as_bytes())
-        .context("failed to decode base64 response body")?;
-
-    match String::from_utf8(decoded) {
-        Ok(text) => Ok(text),
-        Err(_) => Ok(body),
     }
 }
 
@@ -432,8 +287,6 @@ mod tests {
         request_id: &str,
         request_url: &str,
         response_url: Option<&str>,
-        finished: bool,
-        failed: bool,
     ) -> NetworkEntry {
         NetworkEntry {
             page_id: page_id.to_string(),
@@ -460,14 +313,14 @@ mod tests {
                 encoded_data_length: 128.0,
                 timestamp: 2.0,
             }),
-            finished,
-            failed,
-            failure_text: failed.then(|| "net::ERR_FAILED".to_string()),
+            finished: false,
+            failed: false,
+            failure_text: None,
         }
     }
 
     #[test]
-    fn latest_completed_entry_prefers_newest_match() {
+    fn page_entries_returns_page_entries_in_recorded_order() {
         let mut state = NetworkState::default();
         state.entries = vec![
             make_entry(
@@ -475,49 +328,41 @@ mod tests {
                 "req-1",
                 "https://example.com/api/search?q=old",
                 Some("https://example.com/api/search?q=old"),
-                true,
-                false,
             ),
             make_entry(
                 "page-1",
                 "req-2",
                 "https://example.com/api/search?q=new",
                 Some("https://example.com/api/search?q=new"),
-                true,
-                false,
+            ),
+            make_entry(
+                "page-2",
+                "req-3",
+                "https://example.com/api/search?q=other-page",
+                Some("https://example.com/api/search?q=other-page"),
             ),
         ];
 
-        let matched = state
-            .latest_completed_entry("page-1", "search")
-            .expect("should find a completed response");
+        let entries = state.page_entries("page-1", None);
 
-        assert_eq!(matched.request_id, "req-2");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].request_id, "req-1");
+        assert_eq!(entries[1].request_id, "req-2");
     }
 
     #[test]
-    fn latest_matching_entry_checks_response_url_too() {
+    fn page_entries_filter_checks_response_url_too() {
         let mut state = NetworkState::default();
         state.entries = vec![make_entry(
             "page-1",
             "req-1",
             "https://example.com/redirect",
             Some("https://api.example.com/final"),
-            false,
-            false,
         )];
 
-        let matched = state
-            .latest_matching_entry("page-1", "api.example.com")
-            .expect("should match response url");
+        let entries = state.page_entries("page-1", Some("api.example.com"));
 
-        assert_eq!(matched.request_id, "req-1");
-    }
-
-    #[test]
-    fn decode_response_body_supports_plain_text() {
-        let decoded =
-            decode_response_body("hello".to_string(), false).expect("plain text should decode");
-        assert_eq!(decoded, "hello");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].request_id, "req-1");
     }
 }

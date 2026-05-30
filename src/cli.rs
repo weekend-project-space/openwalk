@@ -31,6 +31,8 @@ pub enum Command {
         #[command(subcommand)]
         command: ToolCommand,
     },
+    #[command(hide = true)]
+    Daemon(DaemonArgs),
 }
 
 #[derive(Debug, Args)]
@@ -73,6 +75,14 @@ pub struct ToolExecArgs {
     // Keep the remainder untouched so tool-specific flags are not parsed as CLI flags.
     #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
     pub args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DaemonArgs {
+    #[arg(long)]
+    pub session: String,
+    #[arg(long)]
+    pub port: u16,
 }
 
 #[derive(Debug, Subcommand)]

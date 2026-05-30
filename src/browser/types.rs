@@ -136,12 +136,8 @@ pub enum BrowserCommand {
     },
     BrowserVersion,
     PerformanceMetrics,
-    NetworkLog,
-    NetworkWaitResponse {
-        url_contains: String,
-    },
-    NetworkResponseBody {
-        url_contains: String,
+    NetworkLog {
+        url_contains: Option<String>,
     },
     Console {
         min_level: Option<String>,

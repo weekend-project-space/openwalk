@@ -41,8 +41,6 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "browser-version",
     "performance-metrics",
     "network-log",
-    "network-wait-response",
-    "network-response-body",
     "console",
     "console-clear",
     "inspect-info",
@@ -333,35 +331,20 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
         "network-log" => ToolMetadata {
             name: name.to_string(),
             description: "读取当前活动标签页已捕获的网络日志。".to_string(),
-            args: Vec::new(),
+            args: vec![tool_arg(
+                "url_contains",
+                "string",
+                false,
+                "可选的 URL 片段过滤条件",
+            )],
             returns: ToolReturn {
                 return_type: "json-string".to_string(),
                 description: "网络日志条目的 JSON 字符串。".to_string(),
             },
-            examples: vec!["openwalk exec network-log".to_string()],
-            domains: Vec::new(),
-            read_only: true,
-            requires_login: false,
-            tags: vec![
-                "builtin".to_string(),
-                "network".to_string(),
-                "read".to_string(),
+            examples: vec![
+                "openwalk exec network-log".to_string(),
+                "openwalk exec network-log api/search".to_string(),
             ],
-        },
-        "network-response-body" => ToolMetadata {
-            name: name.to_string(),
-            description: "按 URL 片段提取最近一次响应体。".to_string(),
-            args: vec![tool_arg(
-                "url_contains",
-                "string",
-                true,
-                "用于匹配响应 URL 的片段",
-            )],
-            returns: ToolReturn {
-                return_type: "string".to_string(),
-                description: "匹配到的响应体内容。".to_string(),
-            },
-            examples: vec!["openwalk exec network-response-body api/search".to_string()],
             domains: Vec::new(),
             read_only: true,
             requires_login: false,

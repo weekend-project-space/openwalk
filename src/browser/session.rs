@@ -35,6 +35,8 @@ pub struct BrowserSessionState {
     pub headless: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_target_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_port: Option<u16>,
     pub started_at: u64,
 }
 
@@ -196,6 +198,7 @@ pub async fn start_browser_session(
         profile_dir: profile_dir.display().to_string(),
         headless,
         active_target_id: resolve_active_target_id(None, &details.page_target_ids),
+        daemon_port: None,
         started_at: unix_timestamp_now()?,
     };
 
@@ -380,6 +383,24 @@ pub fn list_browser_sessions(global_home: &GlobalHome) -> Result<Vec<String>> {
 
     names.sort();
     Ok(names)
+}
+
+pub fn browser_session_daemon_port(
+    global_home: &GlobalHome,
+    session_name: &str,
+) -> Result<Option<u16>> {
+    Ok(load_state(global_home, session_name)?.and_then(|handle| handle.state.daemon_port))
+}
+
+pub fn record_browser_session_daemon_port(
+    global_home: &GlobalHome,
+    session_name: &str,
+    port: u16,
+) -> Result<()> {
+    let mut handle = load_state(global_home, session_name)?
+        .ok_or_else(|| anyhow!("browser session `{session_name}` is not found"))?;
+    handle.state.daemon_port = Some(port);
+    save_state(&handle.manifest_path, &handle.state)
 }
 
 fn load_state(
@@ -767,6 +788,7 @@ mod tests {
                 profile_dir: "/tmp/bravo".to_string(),
                 headless: true,
                 active_target_id: None,
+                daemon_port: None,
                 started_at: 2,
             },
         )
@@ -782,6 +804,7 @@ mod tests {
                 profile_dir: "/tmp/alpha".to_string(),
                 headless: false,
                 active_target_id: None,
+                daemon_port: None,
                 started_at: 1,
             },
         )

@@ -45,8 +45,9 @@ use tokio::{
 };
 
 pub use session::{
-    attach_browser_session_with_options, ensure_browser_session_with_options,
-    list_browser_sessions, BrowserSessionLaunchOptions,
+    attach_browser_session_with_options, browser_session_daemon_port,
+    ensure_browser_session_with_options, list_browser_sessions, record_browser_session_daemon_port,
+    BrowserSessionLaunchOptions,
 };
 pub use types::{
     BrowserClient, BrowserCommand, BrowserService, BrowserValue, EphemeralLaunchOptions,

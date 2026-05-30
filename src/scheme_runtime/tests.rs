@@ -253,6 +253,19 @@ fn builtin_tool_metadata_exposes_browser_list() {
 }
 
 #[test]
+fn builtin_tool_metadata_exposes_network_log_filter() {
+    let metadata = builtin_tools::builtin_tool_metadata("network-log")
+        .expect("network-log metadata should exist");
+
+    assert_eq!(metadata.name, "network-log");
+    assert_eq!(metadata.args.len(), 1);
+    assert_eq!(metadata.args[0].name, "url_contains");
+    assert_eq!(metadata.args[0].arg_type, "string");
+    assert!(!metadata.args[0].required);
+    assert!(metadata.read_only);
+}
+
+#[test]
 fn browser_list_returns_scheme_vector() {
     let _env_guard = ENV_LOCK.lock().expect("env lock should be acquired");
     let sandbox = TestDir::new();
@@ -525,7 +538,7 @@ async fn execute_script_exposes_false_when_script_meta_is_missing() {
 
 #[test]
 fn scheme_builtin_list_is_large_enough() {
-    assert!(SCHEME_BUILTINS.len() >= 58);
+    assert!(SCHEME_BUILTINS.len() >= 56);
 }
 
 #[test]
@@ -539,8 +552,6 @@ fn scheme_builtin_list_contains_tab_helpers() {
 #[test]
 fn scheme_builtin_list_contains_network_helpers() {
     assert!(SCHEME_BUILTINS.contains(&"network-log"));
-    assert!(SCHEME_BUILTINS.contains(&"network-wait-response"));
-    assert!(SCHEME_BUILTINS.contains(&"network-response-body"));
 }
 
 #[test]

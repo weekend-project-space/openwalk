@@ -2,6 +2,7 @@ mod app;
 mod browser;
 mod builtin_tools;
 mod cli;
+mod daemon;
 mod extlib;
 mod output;
 mod runtime_args;

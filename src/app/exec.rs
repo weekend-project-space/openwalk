@@ -9,6 +9,7 @@ use crate::{
         BrowserSessionLaunchOptions, EphemeralLaunchOptions,
     },
     cli::ToolExecArgs,
+    daemon,
     output::print_execution_result,
     runtime_args::{
         extract_common_runtime_args, parse_browser_close_runtime_args,
@@ -134,6 +135,24 @@ async fn run_scheme_script(
     Ok(())
 }
 
+fn is_daemon_backed_builtin(tool: &str) -> bool {
+    tool == "browser-close"
+        || tool.starts_with("browser-")
+        || tool.starts_with("page-")
+        || tool.starts_with("element-")
+        || tool.starts_with("keyboard-")
+        || tool.starts_with("mouse-")
+        || tool.starts_with("touch-")
+        || tool.starts_with("tab-")
+        || tool.starts_with("network-")
+        || tool == "console"
+        || tool.starts_with("console-")
+        || tool.starts_with("inspect-")
+        || tool.starts_with("tracing-")
+        || tool.starts_with("js-")
+        || tool == "cdp-call"
+}
+
 async fn run_builtin_tool(
     global_home: &GlobalHome,
     _mode: &str,
@@ -171,6 +190,30 @@ async fn run_builtin_tool(
     } else {
         parsed_args.runtime_args.clone()
     };
+    if let Some(session_name) = launch_options.session.as_deref() {
+        if is_daemon_backed_builtin(tool) {
+            let payload = daemon::execute_session_builtin(
+                global_home,
+                session_name,
+                tool,
+                runtime_args.as_slice(),
+                &launch_options,
+            )
+            .await?;
+            let output_payload = if parsed_args.all {
+                json!({
+                    "tool": tool,
+                    "args": parsed_args.runtime_args,
+                    "result": payload,
+                })
+            } else {
+                payload
+            };
+            print_execution_result(parsed_args.output_format, &output_payload)?;
+            return Ok(());
+        }
+    }
+
     let browser = create_browser_service(global_home, launch_options).await?;
     let result = scheme_runtime::execute_builtin(
         tool,

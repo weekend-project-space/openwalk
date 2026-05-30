@@ -74,6 +74,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             let global_home = GlobalHome::discover()?;
             handle_tool_command(&workspace, &global_home, command)
         }
+        Command::Daemon(args) => crate::daemon::run_session_daemon(args.session, args.port).await,
     }
 }
 
