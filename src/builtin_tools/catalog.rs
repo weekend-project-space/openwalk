@@ -33,7 +33,7 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "page-wait-navigation",
     "page-scroll-to",
     "page-scroll-by",
-    "device-viewport",
+    "browser-resize",
     "tab-list",
     "tab-new",
     "tab-select",
@@ -444,6 +444,27 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
                 "lifecycle".to_string(),
             ],
         },
+        "browser-resize" => ToolMetadata {
+            name: name.to_string(),
+            description: "调整当前标签页所在浏览器窗口大小。".to_string(),
+            args: vec![
+                tool_arg("width", "number", true, "窗口宽度，单位为像素"),
+                tool_arg("height", "number", true, "窗口高度，单位为像素"),
+            ],
+            returns: ToolReturn {
+                return_type: "string".to_string(),
+                description: "调整后的窗口大小，格式为 WIDTHxHEIGHT。".to_string(),
+            },
+            examples: vec!["openwalk exec browser-resize 1280 720".to_string()],
+            domains: Vec::new(),
+            read_only: false,
+            requires_login: false,
+            tags: vec![
+                "builtin".to_string(),
+                "browser".to_string(),
+                "window".to_string(),
+            ],
+        },
         _ => default_builtin_tool_metadata(name),
     })
 }
@@ -496,8 +517,6 @@ fn builtin_domain_tag(name: &str) -> &'static str {
         "inspect"
     } else if name.starts_with("tracing-") {
         "tracing"
-    } else if name.starts_with("device-") {
-        "device"
     } else if name.starts_with("browser-") {
         "browser"
     } else if name.starts_with("js-") {

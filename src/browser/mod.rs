@@ -18,7 +18,7 @@ use std::{collections::HashMap, env, str::FromStr, sync::mpsc, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chromiumoxide::cdp::browser_protocol::{
-    emulation::SetDeviceMetricsOverrideParams,
+    browser::{Bounds, GetWindowForTargetParams, SetWindowBoundsParams, WindowState},
     input::{
         DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams,
         DispatchMouseEventType, EmulateTouchFromMouseEventParams, EmulateTouchFromMouseEventType,

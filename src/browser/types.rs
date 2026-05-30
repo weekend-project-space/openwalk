@@ -120,7 +120,7 @@ pub enum BrowserCommand {
         x: i64,
         y: i64,
     },
-    Viewport {
+    Resize {
         width: i64,
         height: i64,
     },

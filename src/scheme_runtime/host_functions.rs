@@ -108,7 +108,7 @@ pub(super) fn register_browser_builtins(env: &mut Environment) {
         "page-wait-navigation" => browser_wait_navigation,
         "page-scroll-to" => browser_scroll_to,
         "page-scroll-by" => browser_scroll_by,
-        "device-viewport" => browser_viewport,
+        "browser-resize" => browser_resize,
         "tab-list" => tab_list,
         "tab-new" => tab_new,
         "tab-select" => tab_select,
@@ -280,11 +280,11 @@ fn browser_scroll_by(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
     call_browser(BrowserCommand::ScrollBy { x, y })
 }
 
-fn browser_viewport(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
-    expect_arity("device-viewport", args, 2)?;
-    let width = expect_i64("device-viewport", &args[0], "width")?;
-    let height = expect_i64("device-viewport", &args[1], "height")?;
-    call_browser(BrowserCommand::Viewport { width, height })
+fn browser_resize(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity("browser-resize", args, 2)?;
+    let width = expect_i64("browser-resize", &args[0], "width")?;
+    let height = expect_i64("browser-resize", &args[1], "height")?;
+    call_browser(BrowserCommand::Resize { width, height })
 }
 
 pub(super) fn browser_upload(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {

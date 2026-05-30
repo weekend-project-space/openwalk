@@ -248,7 +248,6 @@ fn is_browser_tool_name(name: &str) -> bool {
             || name.starts_with("console")
             || name.starts_with("inspect-")
             || name.starts_with("tracing-")
-            || name.starts_with("device-")
             || name.starts_with("js-")
             || name.starts_with("time-")
             || name.starts_with("cdp-"))

@@ -183,7 +183,7 @@ impl BrowserActor {
             BrowserCommand::WaitNavigation => self.wait_navigation().await,
             BrowserCommand::ScrollTo { x, y } => self.scroll_to(x, y).await,
             BrowserCommand::ScrollBy { x, y } => self.scroll_by(x, y).await,
-            BrowserCommand::Viewport { width, height } => self.set_viewport(width, height).await,
+            BrowserCommand::Resize { width, height } => self.resize_window(width, height).await,
             BrowserCommand::Tabs => self.tabs().await,
             BrowserCommand::NewTab { url } => self.new_tab(url).await,
             BrowserCommand::SwitchTab { tab } => self.switch_tab(tab).await,

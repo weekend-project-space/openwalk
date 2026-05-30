@@ -556,7 +556,7 @@ fn scheme_builtin_list_contains_refactored_domain_helpers() {
     assert!(SCHEME_BUILTINS.contains(&"js-eval"));
     assert!(SCHEME_BUILTINS.contains(&"js-wait"));
     assert!(SCHEME_BUILTINS.contains(&"time-sleep"));
-    assert!(SCHEME_BUILTINS.contains(&"device-viewport"));
+    assert!(SCHEME_BUILTINS.contains(&"browser-resize"));
 }
 
 #[test]

@@ -16,7 +16,7 @@ pub fn cli_args_to_scheme_values(name: &str, args: &[String]) -> Result<Vec<Valu
             .iter()
             .map(|value| cli_number_arg(name, value, "timeout-ms"))
             .collect(),
-        "page-scroll-to" | "page-scroll-by" | "device-viewport" => args
+        "page-scroll-to" | "page-scroll-by" | "browser-resize" => args
             .iter()
             .enumerate()
             .map(|(index, value)| cli_number_arg(name, value, cli_xy_label(index)))
