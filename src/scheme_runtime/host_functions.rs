@@ -116,8 +116,6 @@ pub(super) fn register_browser_builtins(env: &mut Environment) {
         "browser-version" => browser_version,
         "performance-metrics" => browser_performance_metrics,
         "network-log" => browser_network_log,
-        "network-wait-response" => browser_network_wait_response,
-        "network-response-body" => browser_network_response_body,
         "console" => browser_console,
         "console-clear" => browser_console_clear,
         "inspect-info" => browser_inspect_info,
@@ -205,24 +203,6 @@ define_browser_builtin!(
     BrowserCommand::PerformanceMetrics
 );
 define_browser_builtin!(
-    browser_network_log,
-    "network-log",
-    [],
-    BrowserCommand::NetworkLog
-);
-define_browser_builtin!(
-    browser_network_wait_response,
-    "network-wait-response",
-    [url_contains => expect_string],
-    BrowserCommand::NetworkWaitResponse { url_contains }
-);
-define_browser_builtin!(
-    browser_network_response_body,
-    "network-response-body",
-    [url_contains => expect_string],
-    BrowserCommand::NetworkResponseBody { url_contains }
-);
-define_browser_builtin!(
     browser_console_clear,
     "console-clear",
     [],
@@ -264,6 +244,16 @@ fn browser_wait_timeout(_: &Engine, args: &[Value]) -> Result<Value, SchemeError
     expect_arity("time-sleep", args, 1)?;
     let ms = expect_u64("time-sleep", &args[0], "ms")?;
     call_browser(BrowserCommand::WaitTimeout { ms })
+}
+
+fn browser_network_log(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity_range("network-log", args, 0, 1)?;
+    let url_contains = if let Some(value) = args.first() {
+        Some(expect_string("network-log", value, "url_contains")?)
+    } else {
+        None
+    };
+    call_browser(BrowserCommand::NetworkLog { url_contains })
 }
 
 fn browser_scroll_to(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
