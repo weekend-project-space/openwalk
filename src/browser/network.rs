@@ -121,12 +121,12 @@ impl BrowserActor {
         Ok(())
     }
 
-    pub(super) async fn network_requests(&mut self) -> Result<BrowserValue> {
+    pub(super) async fn network_log(&mut self) -> Result<BrowserValue> {
         let page = self.ensure_active_page().await?;
         self.ensure_network_tracking_for_page(page.clone()).await?;
         let page_id = page.target_id().as_ref().to_string();
         let entries = self.network_page_entries(page_id.as_str())?;
-        serialize_to_browser_value(&entries, "failed to serialize network requests")
+        serialize_to_browser_value(&entries, "failed to serialize network log")
     }
 
     pub(super) async fn network_wait_response(

@@ -190,7 +190,7 @@ impl BrowserActor {
             BrowserCommand::CloseTab { tab } => self.close_tab(tab).await,
             BrowserCommand::BrowserVersion => self.browser_version().await,
             BrowserCommand::PerformanceMetrics => self.performance_metrics().await,
-            BrowserCommand::NetworkRequests => self.network_requests().await,
+            BrowserCommand::NetworkLog => self.network_log().await,
             BrowserCommand::NetworkWaitResponse { url_contains } => {
                 self.network_wait_response(url_contains).await
             }

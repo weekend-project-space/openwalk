@@ -40,7 +40,7 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "tab-close",
     "browser-version",
     "performance-metrics",
-    "network-list",
+    "network-log",
     "network-wait-response",
     "network-response-body",
     "console",
@@ -330,15 +330,15 @@ pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
                 "navigation".to_string(),
             ],
         },
-        "network-list" => ToolMetadata {
+        "network-log" => ToolMetadata {
             name: name.to_string(),
-            description: "列出当前页面已记录的网络请求与响应。".to_string(),
+            description: "读取当前活动标签页已捕获的网络日志。".to_string(),
             args: Vec::new(),
             returns: ToolReturn {
                 return_type: "json-string".to_string(),
-                description: "网络请求列表的 JSON 字符串。".to_string(),
+                description: "网络日志条目的 JSON 字符串。".to_string(),
             },
-            examples: vec!["openwalk exec network-list".to_string()],
+            examples: vec!["openwalk exec network-log".to_string()],
             domains: Vec::new(),
             read_only: true,
             requires_login: false,

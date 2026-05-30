@@ -136,7 +136,7 @@ pub enum BrowserCommand {
     },
     BrowserVersion,
     PerformanceMetrics,
-    NetworkRequests,
+    NetworkLog,
     NetworkWaitResponse {
         url_contains: String,
     },

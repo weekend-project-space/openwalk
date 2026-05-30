@@ -115,7 +115,7 @@ pub(super) fn register_browser_builtins(env: &mut Environment) {
         "tab-close" => tab_close,
         "browser-version" => browser_version,
         "performance-metrics" => browser_performance_metrics,
-        "network-list" => browser_network_requests,
+        "network-log" => browser_network_log,
         "network-wait-response" => browser_network_wait_response,
         "network-response-body" => browser_network_response_body,
         "console" => browser_console,
@@ -205,10 +205,10 @@ define_browser_builtin!(
     BrowserCommand::PerformanceMetrics
 );
 define_browser_builtin!(
-    browser_network_requests,
-    "network-list",
+    browser_network_log,
+    "network-log",
     [],
-    BrowserCommand::NetworkRequests
+    BrowserCommand::NetworkLog
 );
 define_browser_builtin!(
     browser_network_wait_response,

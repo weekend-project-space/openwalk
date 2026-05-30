@@ -538,7 +538,7 @@ fn scheme_builtin_list_contains_tab_helpers() {
 
 #[test]
 fn scheme_builtin_list_contains_network_helpers() {
-    assert!(SCHEME_BUILTINS.contains(&"network-list"));
+    assert!(SCHEME_BUILTINS.contains(&"network-log"));
     assert!(SCHEME_BUILTINS.contains(&"network-wait-response"));
     assert!(SCHEME_BUILTINS.contains(&"network-response-body"));
 }
