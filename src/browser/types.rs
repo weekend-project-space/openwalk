@@ -124,48 +124,6 @@ pub enum BrowserCommand {
         width: i64,
         height: i64,
     },
-    LocalStorageGet {
-        key: String,
-    },
-    LocalStorageSet {
-        key: String,
-        value: String,
-    },
-    LocalStorageRemove {
-        key: String,
-    },
-    LocalStorageClear,
-    LocalStorageItems,
-    SessionStorageGet {
-        key: String,
-    },
-    SessionStorageSet {
-        key: String,
-        value: String,
-    },
-    SessionStorageRemove {
-        key: String,
-    },
-    SessionStorageClear,
-    SessionStorageItems,
-    Cookies,
-    CookieGet {
-        name: String,
-    },
-    CookieSet {
-        name: String,
-        value: String,
-        url: Option<String>,
-        domain: Option<String>,
-        path: Option<String>,
-    },
-    CookieDelete {
-        name: String,
-        url: Option<String>,
-        domain: Option<String>,
-        path: Option<String>,
-    },
-    CookiesClear,
     Tabs,
     NewTab {
         url: Option<String>,
@@ -435,12 +393,6 @@ pub(super) struct TraceStopInfo {
     pub(super) data_loss_occurred: bool,
     pub(super) trace_format: Option<String>,
     pub(super) stream_compression: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct StorageEntry {
-    pub(super) key: String,
-    pub(super) value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -525,7 +525,7 @@ async fn execute_script_exposes_false_when_script_meta_is_missing() {
 
 #[test]
 fn scheme_builtin_list_is_large_enough() {
-    assert!(SCHEME_BUILTINS.len() >= 60);
+    assert!(SCHEME_BUILTINS.len() >= 58);
 }
 
 #[test]
@@ -557,9 +557,6 @@ fn scheme_builtin_list_contains_refactored_domain_helpers() {
     assert!(SCHEME_BUILTINS.contains(&"js-wait"));
     assert!(SCHEME_BUILTINS.contains(&"time-sleep"));
     assert!(SCHEME_BUILTINS.contains(&"device-viewport"));
-    assert!(SCHEME_BUILTINS.contains(&"cookie-list"));
-    assert!(SCHEME_BUILTINS.contains(&"localstorage-get"));
-    assert!(SCHEME_BUILTINS.contains(&"sessionstorage-get"));
 }
 
 #[test]

@@ -34,21 +34,6 @@ pub const SCHEME_BUILTINS: &[&str] = &[
     "page-scroll-to",
     "page-scroll-by",
     "device-viewport",
-    "localstorage-get",
-    "localstorage-set",
-    "localstorage-remove",
-    "localstorage-clear",
-    "localstorage-list",
-    "sessionstorage-get",
-    "sessionstorage-set",
-    "sessionstorage-remove",
-    "sessionstorage-clear",
-    "sessionstorage-list",
-    "cookie-list",
-    "cookie-get",
-    "cookie-set",
-    "cookie-delete",
-    "cookie-clear",
     "tab-list",
     "tab-new",
     "tab-select",
@@ -513,10 +498,6 @@ fn builtin_domain_tag(name: &str) -> &'static str {
         "tracing"
     } else if name.starts_with("device-") {
         "device"
-    } else if name.starts_with("localstorage-") || name.starts_with("sessionstorage-") {
-        "storage"
-    } else if name.starts_with("cookie-") {
-        "cookie"
     } else if name.starts_with("browser-") {
         "browser"
     } else if name.starts_with("js-") {

@@ -184,42 +184,6 @@ impl BrowserActor {
             BrowserCommand::ScrollTo { x, y } => self.scroll_to(x, y).await,
             BrowserCommand::ScrollBy { x, y } => self.scroll_by(x, y).await,
             BrowserCommand::Viewport { width, height } => self.set_viewport(width, height).await,
-            BrowserCommand::LocalStorageGet { key } => self.storage_get("localStorage", key).await,
-            BrowserCommand::LocalStorageSet { key, value } => {
-                self.storage_set("localStorage", key, value).await
-            }
-            BrowserCommand::LocalStorageRemove { key } => {
-                self.storage_remove("localStorage", key).await
-            }
-            BrowserCommand::LocalStorageClear => self.storage_clear("localStorage").await,
-            BrowserCommand::LocalStorageItems => self.storage_items("localStorage").await,
-            BrowserCommand::SessionStorageGet { key } => {
-                self.storage_get("sessionStorage", key).await
-            }
-            BrowserCommand::SessionStorageSet { key, value } => {
-                self.storage_set("sessionStorage", key, value).await
-            }
-            BrowserCommand::SessionStorageRemove { key } => {
-                self.storage_remove("sessionStorage", key).await
-            }
-            BrowserCommand::SessionStorageClear => self.storage_clear("sessionStorage").await,
-            BrowserCommand::SessionStorageItems => self.storage_items("sessionStorage").await,
-            BrowserCommand::Cookies => self.cookies().await,
-            BrowserCommand::CookieGet { name } => self.cookie_get(name).await,
-            BrowserCommand::CookieSet {
-                name,
-                value,
-                url,
-                domain,
-                path,
-            } => self.cookie_set(name, value, url, domain, path).await,
-            BrowserCommand::CookieDelete {
-                name,
-                url,
-                domain,
-                path,
-            } => self.cookie_delete(name, url, domain, path).await,
-            BrowserCommand::CookiesClear => self.cookies_clear().await,
             BrowserCommand::Tabs => self.tabs().await,
             BrowserCommand::NewTab { url } => self.new_tab(url).await,
             BrowserCommand::SwitchTab { tab } => self.switch_tab(tab).await,

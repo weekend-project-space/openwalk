@@ -109,21 +109,6 @@ pub(super) fn register_browser_builtins(env: &mut Environment) {
         "page-scroll-to" => browser_scroll_to,
         "page-scroll-by" => browser_scroll_by,
         "device-viewport" => browser_viewport,
-        "localstorage-get" => browser_local_storage_get,
-        "localstorage-set" => browser_local_storage_set,
-        "localstorage-remove" => browser_local_storage_remove,
-        "localstorage-clear" => browser_local_storage_clear,
-        "localstorage-list" => browser_local_storage_items,
-        "sessionstorage-get" => browser_session_storage_get,
-        "sessionstorage-set" => browser_session_storage_set,
-        "sessionstorage-remove" => browser_session_storage_remove,
-        "sessionstorage-clear" => browser_session_storage_clear,
-        "sessionstorage-list" => browser_session_storage_items,
-        "cookie-list" => browser_cookies,
-        "cookie-get" => browser_cookie_get,
-        "cookie-set" => browser_cookie_set,
-        "cookie-delete" => browser_cookie_delete,
-        "cookie-clear" => browser_cookies_clear,
         "tab-list" => tab_list,
         "tab-new" => tab_new,
         "tab-select" => tab_select,
@@ -205,44 +190,6 @@ define_browser_builtin!(
     "page-wait-navigation",
     [],
     BrowserCommand::WaitNavigation
-);
-define_browser_builtin!(browser_local_storage_get, "localstorage-get", [key => expect_string], BrowserCommand::LocalStorageGet { key });
-define_browser_builtin!(browser_local_storage_set, "localstorage-set", [key => expect_string, value => expect_string], BrowserCommand::LocalStorageSet { key, value });
-define_browser_builtin!(browser_local_storage_remove, "localstorage-remove", [key => expect_string], BrowserCommand::LocalStorageRemove { key });
-define_browser_builtin!(
-    browser_local_storage_clear,
-    "localstorage-clear",
-    [],
-    BrowserCommand::LocalStorageClear
-);
-define_browser_builtin!(
-    browser_local_storage_items,
-    "localstorage-list",
-    [],
-    BrowserCommand::LocalStorageItems
-);
-define_browser_builtin!(browser_session_storage_get, "sessionstorage-get", [key => expect_string], BrowserCommand::SessionStorageGet { key });
-define_browser_builtin!(browser_session_storage_set, "sessionstorage-set", [key => expect_string, value => expect_string], BrowserCommand::SessionStorageSet { key, value });
-define_browser_builtin!(browser_session_storage_remove, "sessionstorage-remove", [key => expect_string], BrowserCommand::SessionStorageRemove { key });
-define_browser_builtin!(
-    browser_session_storage_clear,
-    "sessionstorage-clear",
-    [],
-    BrowserCommand::SessionStorageClear
-);
-define_browser_builtin!(
-    browser_session_storage_items,
-    "sessionstorage-list",
-    [],
-    BrowserCommand::SessionStorageItems
-);
-define_browser_builtin!(browser_cookies, "cookie-list", [], BrowserCommand::Cookies);
-define_browser_builtin!(browser_cookie_get, "cookie-get", [name => expect_string], BrowserCommand::CookieGet { name });
-define_browser_builtin!(
-    browser_cookies_clear,
-    "cookie-clear",
-    [],
-    BrowserCommand::CookiesClear
 );
 define_browser_builtin!(tab_list, "tab-list", [], BrowserCommand::Tabs);
 define_browser_builtin!(
@@ -386,36 +333,6 @@ fn tab_close(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
         Some(expect_tab_reference("tab-close", &args[0], "tab")?)
     };
     call_browser(BrowserCommand::CloseTab { tab })
-}
-
-fn browser_cookie_set(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
-    expect_arity_range("cookie-set", args, 2, 5)?;
-    let name = expect_string("cookie-set", &args[0], "name")?;
-    let value = expect_string("cookie-set", &args[1], "value")?;
-    let url = optional_string_arg("cookie-set", args, 2, "url")?;
-    let domain = optional_string_arg("cookie-set", args, 3, "domain")?;
-    let path = optional_string_arg("cookie-set", args, 4, "path")?;
-    call_browser(BrowserCommand::CookieSet {
-        name,
-        value,
-        url,
-        domain,
-        path,
-    })
-}
-
-fn browser_cookie_delete(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
-    expect_arity_range("cookie-delete", args, 1, 4)?;
-    let name = expect_string("cookie-delete", &args[0], "name")?;
-    let url = optional_string_arg("cookie-delete", args, 1, "url")?;
-    let domain = optional_string_arg("cookie-delete", args, 2, "domain")?;
-    let path = optional_string_arg("cookie-delete", args, 3, "path")?;
-    call_browser(BrowserCommand::CookieDelete {
-        name,
-        url,
-        domain,
-        path,
-    })
 }
 
 fn browser_mouse_move(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
@@ -610,17 +527,4 @@ fn expect_mouse_button(
 ) -> Result<chromiumoxide::cdp::browser_protocol::input::MouseButton, SchemeError> {
     let raw = expect_string(name, value, label)?;
     parse_mouse_button(raw.as_str()).map_err(|err| SchemeError::type_error(format!("{err:#}")))
-}
-
-fn optional_string_arg(
-    name: &str,
-    args: &[Value],
-    index: usize,
-    label: &str,
-) -> Result<Option<String>, SchemeError> {
-    if let Some(value) = args.get(index) {
-        Ok(Some(expect_string(name, value, label)?))
-    } else {
-        Ok(None)
-    }
 }

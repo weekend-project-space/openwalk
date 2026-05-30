@@ -10,7 +10,6 @@ mod page;
 mod performance;
 mod runtime;
 mod session;
-mod storage;
 mod tab;
 mod types;
 mod util;
@@ -25,7 +24,6 @@ use chromiumoxide::cdp::browser_protocol::{
         DispatchMouseEventType, EmulateTouchFromMouseEventParams, EmulateTouchFromMouseEventType,
         MouseButton, SynthesizeScrollGestureParams,
     },
-    network::{CookieParam, DeleteCookiesParams},
     page::{
         CaptureScreenshotFormat, EventFrameNavigated, EventLifecycleEvent,
         EventNavigatedWithinDocument, FrameId, GetLayoutMetricsParams, PrintToPdfParams,
