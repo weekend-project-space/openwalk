@@ -139,6 +139,10 @@ pub enum BrowserCommand {
     NetworkLog {
         url_contains: Option<String>,
     },
+    DialogAccept {
+        prompt_text: Option<String>,
+    },
+    DialogDismiss,
     Console {
         min_level: Option<String>,
     },

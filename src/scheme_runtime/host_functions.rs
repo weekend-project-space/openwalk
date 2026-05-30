@@ -116,6 +116,8 @@ pub(super) fn register_browser_builtins(env: &mut Environment) {
         "browser-version" => browser_version,
         "performance-metrics" => browser_performance_metrics,
         "network-log" => browser_network_log,
+        "dialog-accept" => browser_dialog_accept,
+        "dialog-dismiss" => browser_dialog_dismiss,
         "console" => browser_console,
         "console-clear" => browser_console_clear,
         "inspect-info" => browser_inspect_info,
@@ -255,6 +257,23 @@ fn browser_network_log(_: &Engine, args: &[Value]) -> Result<Value, SchemeError>
     };
     call_browser(BrowserCommand::NetworkLog { url_contains })
 }
+
+fn browser_dialog_accept(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
+    expect_arity_range("dialog-accept", args, 0, 1)?;
+    let prompt_text = if let Some(value) = args.first() {
+        Some(expect_string("dialog-accept", value, "prompt_text")?)
+    } else {
+        None
+    };
+    call_browser(BrowserCommand::DialogAccept { prompt_text })
+}
+
+define_browser_builtin!(
+    browser_dialog_dismiss,
+    "dialog-dismiss",
+    [],
+    BrowserCommand::DialogDismiss
+);
 
 fn browser_scroll_to(_: &Engine, args: &[Value]) -> Result<Value, SchemeError> {
     expect_arity("page-scroll-to", args, 2)?;

@@ -145,6 +145,7 @@ fn is_daemon_backed_builtin(tool: &str) -> bool {
         || tool.starts_with("touch-")
         || tool.starts_with("tab-")
         || tool.starts_with("network-")
+        || tool.starts_with("dialog-")
         || tool == "console"
         || tool.starts_with("console-")
         || tool.starts_with("inspect-")

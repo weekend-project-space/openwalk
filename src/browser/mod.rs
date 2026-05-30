@@ -1,6 +1,7 @@
 mod actor;
 mod browser_ops;
 mod devtools;
+mod dialog;
 mod dom;
 mod emulation;
 mod input;

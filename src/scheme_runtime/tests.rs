@@ -266,6 +266,30 @@ fn builtin_tool_metadata_exposes_network_log_filter() {
 }
 
 #[test]
+fn builtin_tool_metadata_exposes_dialog_accept_prompt() {
+    let metadata = builtin_tools::builtin_tool_metadata("dialog-accept")
+        .expect("dialog-accept metadata should exist");
+
+    assert_eq!(metadata.name, "dialog-accept");
+    assert_eq!(metadata.args.len(), 1);
+    assert_eq!(metadata.args[0].name, "prompt_text");
+    assert_eq!(metadata.args[0].arg_type, "string");
+    assert!(!metadata.args[0].required);
+    assert!(!metadata.read_only);
+}
+
+#[test]
+fn builtin_tool_metadata_exposes_dialog_dismiss() {
+    let metadata = builtin_tools::builtin_tool_metadata("dialog-dismiss")
+        .expect("dialog-dismiss metadata should exist");
+
+    assert_eq!(metadata.name, "dialog-dismiss");
+    assert!(metadata.args.is_empty());
+    assert_eq!(metadata.returns.return_type, "boolean");
+    assert!(!metadata.read_only);
+}
+
+#[test]
 fn browser_list_returns_scheme_vector() {
     let _env_guard = ENV_LOCK.lock().expect("env lock should be acquired");
     let sandbox = TestDir::new();
@@ -538,7 +562,7 @@ async fn execute_script_exposes_false_when_script_meta_is_missing() {
 
 #[test]
 fn scheme_builtin_list_is_large_enough() {
-    assert!(SCHEME_BUILTINS.len() >= 56);
+    assert!(SCHEME_BUILTINS.len() >= 58);
 }
 
 #[test]
@@ -552,6 +576,12 @@ fn scheme_builtin_list_contains_tab_helpers() {
 #[test]
 fn scheme_builtin_list_contains_network_helpers() {
     assert!(SCHEME_BUILTINS.contains(&"network-log"));
+}
+
+#[test]
+fn scheme_builtin_list_contains_dialog_helpers() {
+    assert!(SCHEME_BUILTINS.contains(&"dialog-accept"));
+    assert!(SCHEME_BUILTINS.contains(&"dialog-dismiss"));
 }
 
 #[test]

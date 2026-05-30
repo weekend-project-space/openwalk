@@ -191,6 +191,8 @@ impl BrowserActor {
             BrowserCommand::BrowserVersion => self.browser_version().await,
             BrowserCommand::PerformanceMetrics => self.performance_metrics().await,
             BrowserCommand::NetworkLog { url_contains } => self.network_log(url_contains).await,
+            BrowserCommand::DialogAccept { prompt_text } => self.dialog_accept(prompt_text).await,
+            BrowserCommand::DialogDismiss => self.dialog_dismiss().await,
             BrowserCommand::Console { min_level } => self.console(min_level).await,
             BrowserCommand::ConsoleClear => self.console_clear().await,
             BrowserCommand::InspectInfo { selector } => {

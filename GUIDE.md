@@ -149,6 +149,8 @@ openwalk tool info hello-word
 | `tab-new`         | `openwalk exec tab-new [url]`          | Create a new tab       |
 | `tab-select`      | `openwalk exec tab-select <tab>`       | Switch tabs            |
 | `tab-close`       | `openwalk exec tab-close [tab]`        | Close a tab            |
+| `dialog-accept`   | `openwalk exec dialog-accept [text]`   | Accept the current JavaScript dialog |
+| `dialog-dismiss`  | `openwalk exec dialog-dismiss`         | Dismiss the current JavaScript dialog |
 | `browser-close`   | `openwalk exec browser-close`          | Close the browser session |
 
 For a quick browsable capability overview:
