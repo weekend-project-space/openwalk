@@ -18,7 +18,7 @@ openwalk exec bing/search "Claude Code" 5
 openwalk exec reddit/hot LocalLLaMA
 openwalk exec v2ex/hot
 
-openwalk exec browser-open https://news.ycombinator.com -s=demo
+openwalk exec browser-open https://news.ycombinator.com -s=demo --new-tab --headed
 openwalk exec page-snapshot -s=demo
 openwalk exec browser-close -s=demo
 ```
@@ -113,13 +113,13 @@ Useful built-in browser tools include:
 
 ## Core Commands
 
-| Command | Example | Purpose |
-| ------- | ------- | ------- |
-| `exec` | `openwalk exec browser-open https://example.com` | Run a built-in tool, local script, workspace/global tool, or hub tool |
-| `install` | `openwalk install` | Install tools declared by the current project |
-| `tool ls` | `openwalk tool ls` | List directly runnable tools |
-| `tool info` | `openwalk tool info browser-open` | Show usage, arguments, options, returns, and examples |
-| `exec --help` | `openwalk exec browser-open --help` | Show tool help without running the tool |
+| Command       | Example                                          | Purpose                                                               |
+| ------------- | ------------------------------------------------ | --------------------------------------------------------------------- |
+| `exec`        | `openwalk exec browser-open https://example.com` | Run a built-in tool, local script, workspace/global tool, or hub tool |
+| `install`     | `openwalk install`                               | Install tools declared by the current project                         |
+| `tool ls`     | `openwalk tool ls`                               | List directly runnable tools                                          |
+| `tool info`   | `openwalk tool info browser-open`                | Show usage, arguments, options, returns, and examples                 |
+| `exec --help` | `openwalk exec browser-open --help`              | Show tool help without running the tool                               |
 
 `exec` is the main path. It resolves tools in this order: local script, workspace tool, built-in host function, global tool, then hub auto-install into the current project.
 
