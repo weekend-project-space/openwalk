@@ -12,7 +12,7 @@ use crate::{
 use super::{
     presentation::{tool_usage_from_metadata, trim_tool_description},
     target::{
-        package_exists, resolve_global_tool_target, resolve_script_target,
+        package_exists, resolve_global_tool_target, resolve_kit_tool_target, resolve_script_target,
         resolve_workspace_tool_target, tool_exists,
     },
     types::{ToolInfoEntry, ToolInfoView},
@@ -266,12 +266,16 @@ pub(super) fn load_tool_info(
         return build_tool_info("workspace-tool", script_path);
     }
 
-    if tool_exists(target) {
-        return build_builtin_tool_info(target);
-    }
-
     if let Some(script_path) = resolve_global_tool_target(global_home, target)? {
         return build_tool_info("global-tool", script_path);
+    }
+
+    if let Some(script_path) = resolve_kit_tool_target(global_home, target)? {
+        return build_tool_info("kit-tool", script_path);
+    }
+
+    if tool_exists(target) {
+        return build_builtin_tool_info(target);
     }
 
     if package_exists(&workspace.load_tools_or_default()?, target) {

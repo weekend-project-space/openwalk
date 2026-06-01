@@ -102,6 +102,38 @@ impl LocalHubRepo {
         }
     }
 
+    fn with_kit_tools(tools: &[(&str, &str)]) -> Self {
+        let sandbox = TestDir::new();
+        let path = sandbox.path.join("hub");
+        for (name, body) in tools {
+            fs::create_dir_all(path.join("kit").join(name))
+                .expect("hub kit tool directory should be created");
+            fs::write(path.join("kit").join(name).join("main.scm"), body)
+                .expect("hub kit tool script should be written");
+        }
+
+        run_git(&path, &["init"]);
+        run_git(&path, &["checkout", "-b", "main"]);
+        run_git(&path, &["add", "."]);
+        run_git(
+            &path,
+            &[
+                "-c",
+                "user.name=OpenWalk Tests",
+                "-c",
+                "user.email=tests@example.com",
+                "commit",
+                "-m",
+                "initial hub kit fixture",
+            ],
+        );
+
+        Self {
+            _sandbox: sandbox,
+            path,
+        }
+    }
+
     fn path(&self) -> &Path {
         &self.path
     }
@@ -134,6 +166,16 @@ fn install_test_hub_tool(name: &str, body: &str) -> (LocalHubRepo, EnvVarGuard, 
 
 fn install_test_hub_tools(tools: &[(&str, &str)]) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
     let repo = LocalHubRepo::with_tools(tools);
+    let url_guard = EnvVarGuard::set(
+        OPENWALK_HUB_GIT_URL_ENV,
+        repo.path().to_str().expect("utf8 path"),
+    );
+    let ref_guard = EnvVarGuard::set(OPENWALK_HUB_GIT_REF_ENV, "main");
+    (repo, url_guard, ref_guard)
+}
+
+fn install_test_hub_kit_tools(tools: &[(&str, &str)]) -> (LocalHubRepo, EnvVarGuard, EnvVarGuard) {
+    let repo = LocalHubRepo::with_kit_tools(tools);
     let url_guard = EnvVarGuard::set(
         OPENWALK_HUB_GIT_URL_ENV,
         repo.path().to_str().expect("utf8 path"),
@@ -607,6 +649,46 @@ fn load_tool_info_reads_global_script_metadata() {
 }
 
 #[test]
+fn load_tool_info_resolves_kit_short_alias() {
+    let _env_guard = HUB_ENV_LOCK
+        .lock()
+        .expect("hub env lock should be acquired");
+    let workspace_sandbox = TestDir::new();
+    let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+    let (_global_sandbox, global_home) = initialized_global_home();
+    let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_kit_tools(&[(
+        "sys/search",
+        r#"#| @meta
+{
+  "name": "sys/search",
+  "description": "Kit search",
+  "args": [],
+  "returns": {
+    "type": "string",
+    "description": "search result"
+  },
+  "examples": ["openwalk exec search"],
+  "domains": [],
+  "readOnly": true,
+  "requiresLogin": false,
+  "tags": ["search"]
+}
+|#
+(define (main args) "kit-search-ok")
+"#,
+    )]);
+    crate::tool_hub::sync_kit_from_hub(&global_home.kit_dir())
+        .expect("kit should sync before info lookup");
+
+    let info =
+        load_tool_info(&workspace, &global_home, "search").expect("kit alias info should load");
+
+    assert_eq!(info.name, "sys/search");
+    assert_eq!(info.source, "kit-tool");
+    assert_eq!(info.metadata.description, "Kit search");
+}
+
+#[test]
 fn workspace_tool_entries_include_metadata_description() {
     let (_sandbox, workspace) = initialized_workspace();
     let tool_dir = workspace.tool_dir("bing-search");
@@ -689,6 +771,34 @@ fn render_tool_list_lines_aligns_usage_column() {
 
     assert_eq!(lines[0], "browser-open <url>  打开浏览器并导航");
     assert_eq!(lines[1], "tab-list            列出所有标签页");
+}
+
+#[test]
+fn tool_list_includes_only_supported_kit_namespaces() {
+    let (_workspace_sandbox, workspace) = initialized_workspace();
+    let (_global_sandbox, global_home) = initialized_global_home();
+    for (tool_name, body) in [
+        ("sys/search", r#"(define (main args) "sys")"#),
+        ("debug/echo", r#"(define (main args) "debug")"#),
+        ("future/hidden", r#"(define (main args) "hidden")"#),
+    ] {
+        let entry = global_home.kit_tool_entry_path(tool_name);
+        fs::create_dir_all(entry.parent().expect("kit tool entry should have parent"))
+            .expect("kit tool dir should be created");
+        fs::write(entry, body).expect("kit tool should be written");
+    }
+
+    let entries = list::collect_tool_entries(&workspace, &global_home)
+        .expect("tool list entries should load");
+    let kit_names = entries
+        .iter()
+        .filter(|entry| entry.source == "kit")
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(kit_names.contains(&"sys/search"));
+    assert!(kit_names.contains(&"debug/echo"));
+    assert!(!kit_names.contains(&"future/hidden"));
 }
 
 #[test]
@@ -930,6 +1040,168 @@ async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
         .expect("tools should load after remote exec install");
     assert!(package_exists(&installed, "v2ex/hot"));
     assert!(workspace.tool_entry_path("v2ex/hot").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_run_syncs_kit_on_startup_and_executes_explicit_kit_tool() {
+    let _env_guard = HUB_ENV_LOCK
+        .lock()
+        .expect("hub env lock should be acquired");
+    let _cwd_guard = CWD_LOCK
+        .acquire()
+        .await
+        .expect("cwd lock should be acquired");
+    let workspace_sandbox = TestDir::new();
+    let previous_dir = env::current_dir().expect("cwd should be readable");
+    env::set_current_dir(&workspace_sandbox.path).expect("should change cwd for the test");
+    let global_sandbox = TestDir::new();
+    let global_home_root = global_sandbox.path.join("global-home");
+    let global_home = GlobalHome::from_root(global_home_root.clone());
+    let _openwalk_home = EnvVarGuard::set(
+        "OPENWALK_HOME",
+        global_home_root
+            .to_str()
+            .expect("global home path should be utf8"),
+    );
+    let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_kit_tools(&[(
+        "sys/search",
+        r#"(define (main args) "kit-search-ok")
+"#,
+    )]);
+
+    let result = run(Cli {
+        command: crate::cli::Command::Exec(ToolExecArgs {
+            tool: "sys/search".to_string(),
+            args: Vec::new(),
+        }),
+    })
+    .await;
+
+    env::set_current_dir(previous_dir).expect("cwd should be restored");
+
+    result.expect("app run should sync and run the kit tool");
+
+    assert!(global_home.kit_tool_entry_path("sys/search").exists());
+    let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+    assert!(!workspace.tool_entry_path("sys/search").exists());
+    let installed = workspace
+        .load_tools_or_default()
+        .expect("workspace tools should load");
+    assert!(!package_exists(&installed, "sys/search"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_tool_prefers_global_tools_over_kit_tools() {
+    let _env_guard = HUB_ENV_LOCK
+        .lock()
+        .expect("hub env lock should be acquired");
+    let workspace_sandbox = TestDir::new();
+    let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+    let (_global_sandbox, global_home) = initialized_global_home();
+    let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_kit_tools(&[(
+        "sys/search",
+        r#"(define (main args) (undefined-kit-symbol))
+"#,
+    )]);
+    crate::tool_hub::sync_kit_from_hub(&global_home.kit_dir())
+        .expect("kit should sync before precedence check");
+    let global_entry = global_home.tool_entry_path("sys/search");
+    fs::create_dir_all(
+        global_entry
+            .parent()
+            .expect("global tool entry should have parent"),
+    )
+    .expect("global tool dir should be created");
+    fs::write(&global_entry, r#"(define (main args) "global-search-ok")"#)
+        .expect("global tool should be written");
+
+    exec_tool(
+        &workspace,
+        &global_home,
+        ToolExecArgs {
+            tool: "sys/search".to_string(),
+            args: Vec::new(),
+        },
+    )
+    .await
+    .expect("exec should run global tool before syncing kit");
+
+    assert!(global_entry.exists());
+    assert!(global_home.kit_tool_entry_path("sys/search").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_tool_resolves_kit_short_alias_after_workspace_and_global_tools() {
+    let _env_guard = HUB_ENV_LOCK
+        .lock()
+        .expect("hub env lock should be acquired");
+    let workspace_sandbox = TestDir::new();
+    let workspace = Workspace::from_base_dir(workspace_sandbox.path.clone());
+    let (_global_sandbox, global_home) = initialized_global_home();
+    let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_kit_tools(&[(
+        "sys/search",
+        r#"(define (main args) "kit-search-ok")
+"#,
+    )]);
+    crate::tool_hub::sync_kit_from_hub(&global_home.kit_dir())
+        .expect("kit should sync before alias check");
+
+    exec_tool(
+        &workspace,
+        &global_home,
+        ToolExecArgs {
+            tool: "search".to_string(),
+            args: Vec::new(),
+        },
+    )
+    .await
+    .expect("exec should run sys/search through the kit short alias");
+
+    assert!(global_home.kit_tool_entry_path("sys/search").exists());
+    assert!(!workspace.tool_entry_path("search").exists());
+    assert!(!global_home.tool_entry_path("search").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_tool_prefers_workspace_tool_over_kit_short_alias() {
+    let _env_guard = HUB_ENV_LOCK
+        .lock()
+        .expect("hub env lock should be acquired");
+    let (_workspace_sandbox, workspace) = initialized_workspace();
+    let (_global_sandbox, global_home) = initialized_global_home();
+    let (_repo, _hub_url_guard, _hub_ref_guard) = install_test_hub_kit_tools(&[(
+        "sys/search",
+        r#"(define (main args) (undefined-kit-symbol))
+"#,
+    )]);
+    crate::tool_hub::sync_kit_from_hub(&global_home.kit_dir())
+        .expect("kit should sync before precedence check");
+    let workspace_entry = workspace.tool_entry_path("search");
+    fs::create_dir_all(
+        workspace_entry
+            .parent()
+            .expect("workspace tool entry should have parent"),
+    )
+    .expect("workspace tool dir should be created");
+    fs::write(
+        &workspace_entry,
+        r#"(define (main args) "workspace-search-ok")"#,
+    )
+    .expect("workspace tool should be written");
+
+    exec_tool(
+        &workspace,
+        &global_home,
+        ToolExecArgs {
+            tool: "search".to_string(),
+            args: Vec::new(),
+        },
+    )
+    .await
+    .expect("exec should run workspace tool before the kit alias");
+
+    assert!(workspace_entry.exists());
+    assert!(global_home.kit_tool_entry_path("sys/search").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]

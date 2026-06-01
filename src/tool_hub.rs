@@ -14,6 +14,7 @@ pub const OPENWALK_HUB_GIT_REF_ENV: &str = "OPENWALK_HUB_GIT_REF";
 const DEFAULT_OPENWALK_HUB_GIT_URL: &str = "https://github.com/weekend-project-space/openwalkhub";
 const DEFAULT_OPENWALK_HUB_GIT_REF: &str = "main";
 const TOOL_ENTRY_FILE: &str = "main.scm";
+const KIT_DIR: &str = "kit";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolHubConfig {
@@ -85,6 +86,28 @@ pub fn install_tool_from_hub(package: &str, destination_dir: &Path) -> Result<Pa
     }
 
     Ok(installed_entry)
+}
+
+pub fn sync_kit_from_hub(destination_dir: &Path) -> Result<()> {
+    if destination_dir.exists() {
+        return Ok(());
+    }
+
+    let config = ToolHubConfig::from_env();
+    let checkout_root = TempCheckoutDir::new()?;
+    let checkout_dir = checkout_root.path().join("hub");
+
+    clone_hub_repo(&config, &checkout_dir)?;
+
+    let source_dir = checkout_dir.join(KIT_DIR);
+    if !source_dir.is_dir() {
+        bail!(
+            "kit directory was not found under kit/ in {}",
+            config.git_url
+        );
+    }
+
+    copy_directory_recursively(&source_dir, destination_dir)
 }
 
 fn clone_hub_repo(config: &ToolHubConfig, checkout_dir: &Path) -> Result<()> {

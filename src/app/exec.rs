@@ -23,8 +23,8 @@ use super::{
     info::show_tool_info,
     install::ensure_workspace_package_installed,
     target::{
-        resolve_global_tool_target, resolve_run_target, resolve_script_target,
-        resolve_workspace_tool_target, tool_exists,
+        resolve_global_tool_target, resolve_kit_tool_target, resolve_run_target,
+        resolve_script_target, resolve_workspace_tool_target, tool_exists,
     },
 };
 
@@ -79,12 +79,16 @@ pub(super) async fn exec_tool(
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
     }
 
-    if tool_exists(&tool) {
-        return run_builtin_tool(global_home, "exec", &tool, &cli_args).await;
-    }
-
     if let Some(script_path) = resolve_global_tool_target(global_home, &tool)? {
         return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
+    }
+
+    if let Some(script_path) = resolve_kit_tool_target(global_home, &tool)? {
+        return run_scheme_script(global_home, "exec", &script_path, &cli_args).await;
+    }
+
+    if tool_exists(&tool) {
+        return run_builtin_tool(global_home, "exec", &tool, &cli_args).await;
     }
 
     let installed = ensure_workspace_package_installed(workspace, &tool)?;

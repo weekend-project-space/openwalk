@@ -16,6 +16,8 @@ pub(super) fn package_exists(store: &ToolStore, package: &str) -> bool {
     store.packages.iter().any(|item| item.name == package)
 }
 
+pub(super) const KIT_TOOL_NAMESPACES: &[&str] = &["sys", "debug"];
+
 pub(super) fn resolve_workspace_tool_target(
     workspace: &Workspace,
     target: &str,
@@ -40,6 +42,37 @@ pub(super) fn resolve_global_tool_target(
     } else {
         Ok(None)
     }
+}
+
+pub(super) fn resolve_kit_tool_target(
+    global_home: &GlobalHome,
+    target: &str,
+) -> Result<Option<PathBuf>> {
+    validate_tool_ref(target)?;
+
+    for candidate in kit_lookup_candidates(target) {
+        let entry = global_home.kit_tool_entry_path(candidate.as_str());
+        if entry.exists() {
+            return Ok(Some(entry));
+        }
+    }
+
+    Ok(None)
+}
+
+fn kit_lookup_candidates(target: &str) -> Vec<String> {
+    if KIT_TOOL_NAMESPACES
+        .iter()
+        .any(|namespace| target.starts_with(&format!("{namespace}/")))
+    {
+        return vec![target.to_string()];
+    }
+
+    if !target.contains('/') {
+        return vec![format!("sys/{target}")];
+    }
+
+    Vec::new()
 }
 
 pub(super) fn resolve_script_target(target: &str) -> Result<Option<PathBuf>> {

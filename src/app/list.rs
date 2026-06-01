@@ -10,6 +10,7 @@ use crate::{
 
 use super::{
     presentation::{compact_tool_description, tool_usage_from_metadata},
+    target::KIT_TOOL_NAMESPACES,
     types::ToolListEntry,
 };
 
@@ -19,9 +20,7 @@ pub(super) fn list_tools(
     format: String,
 ) -> Result<()> {
     let output_format = parse_output_format(&format)?;
-    let mut entries = builtin_entries();
-    entries.extend(workspace_tool_entries(workspace)?);
-    entries.extend(global_tool_entries(global_home)?);
+    let entries = collect_tool_entries(workspace, global_home)?;
 
     let payload = if output_format == OutputFormat::Json {
         serde_json::to_value(entries)?
@@ -30,6 +29,17 @@ pub(super) fn list_tools(
     };
 
     print_tool_output(output_format, "tool-list", None, payload)
+}
+
+pub(super) fn collect_tool_entries(
+    workspace: &Workspace,
+    global_home: &GlobalHome,
+) -> Result<Vec<ToolListEntry>> {
+    let mut entries = builtin_entries();
+    entries.extend(workspace_tool_entries(workspace)?);
+    entries.extend(global_tool_entries(global_home)?);
+    entries.extend(kit_tool_entries(global_home)?);
+    Ok(entries)
 }
 
 fn builtin_entries() -> Vec<ToolListEntry> {
@@ -95,6 +105,33 @@ fn global_tool_entries(global_home: &GlobalHome) -> Result<Vec<ToolListEntry>> {
                 usage,
                 description,
                 source: "global".to_string(),
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(entries)
+}
+
+fn kit_tool_entries(global_home: &GlobalHome) -> Result<Vec<ToolListEntry>> {
+    let mut entries = global_home
+        .kit_tools_in_namespaces(KIT_TOOL_NAMESPACES)?
+        .into_iter()
+        .map(|tool| {
+            let metadata = load_tool_metadata(&tool.entry_path).ok();
+            let usage = metadata
+                .as_ref()
+                .map(|metadata| tool_usage_from_metadata(tool.name.as_str(), &metadata.args))
+                .unwrap_or_else(|| tool.name.clone());
+            let description = metadata
+                .as_ref()
+                .map(|metadata| metadata.description.clone())
+                .unwrap_or_else(|| "Kit Scheme tool".to_string());
+
+            ToolListEntry {
+                name: tool.name,
+                usage,
+                description,
+                source: "kit".to_string(),
             }
         })
         .collect::<Vec<_>>();

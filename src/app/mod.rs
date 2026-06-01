@@ -13,6 +13,7 @@ use anyhow::Result;
 use crate::{
     app::{exec::exec_tool, install::install_workspace_tools},
     cli::{Cli, Command, ToolCommand},
+    tool_hub::sync_kit_from_hub,
     workspace::{GlobalHome, Workspace},
 };
 
@@ -60,6 +61,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         //     init_workspace(&workspace, args)
         // }
         Command::Install(args) => {
+            let global_home = GlobalHome::discover()?;
+            sync_kit_from_hub(&global_home.kit_dir())?;
             let workspace = Workspace::discover()?;
             install_workspace_tools(&workspace, args)
         }
@@ -67,11 +70,13 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Exec(args) => {
             let workspace = Workspace::discover()?;
             let global_home = GlobalHome::discover()?;
+            sync_kit_from_hub(&global_home.kit_dir())?;
             exec_tool(&workspace, &global_home, args).await
         }
         Command::Tool { command } => {
             let workspace = Workspace::discover()?;
             let global_home = GlobalHome::discover()?;
+            sync_kit_from_hub(&global_home.kit_dir())?;
             handle_tool_command(&workspace, &global_home, command)
         }
         Command::Daemon(args) => crate::daemon::run_session_daemon(args.session, args.port).await,

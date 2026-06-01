@@ -107,7 +107,7 @@ pub enum ToolCommand {
     //     /// Tool package name, for example browser-tools
     //     package: String,
     // },
-    /// List runnable built-in, workspace, and global tools.
+    /// List runnable built-in, workspace, global, and kit tools.
     Ls {
         /// Output format: yaml (default compact list), md, or json.
         #[arg(short = 'f', long = "format", default_value = "yaml")]

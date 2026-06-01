@@ -15,6 +15,7 @@ const MANIFEST_FILE: &str = "openwalk.json";
 const GLOBAL_REPO_DIR: &str = "repo";
 const LEGACY_CONFIG_FILE: &str = "config.json";
 const TOOLS_DIR: &str = "tools";
+const KIT_DIR: &str = "kit";
 const BIN_DIR: &str = "bin";
 const RUN_DIR: &str = "run";
 const BROWSER_RUN_DIR: &str = "browser";
@@ -421,12 +422,24 @@ impl GlobalHome {
         self.root.join(GLOBAL_REPO_DIR).join(TOOLS_DIR)
     }
 
+    pub fn kit_dir(&self) -> PathBuf {
+        self.root.join(GLOBAL_REPO_DIR).join(KIT_DIR)
+    }
+
     pub fn tool_dir(&self, tool_name: &str) -> PathBuf {
         self.tools_dir().join(tool_name)
     }
 
     pub fn tool_entry_path(&self, tool_name: &str) -> PathBuf {
         self.tool_dir(tool_name).join(TOOL_ENTRY_FILE)
+    }
+
+    pub fn kit_tool_dir(&self, tool_name: &str) -> PathBuf {
+        self.kit_dir().join(tool_name)
+    }
+
+    pub fn kit_tool_entry_path(&self, tool_name: &str) -> PathBuf {
+        self.kit_tool_dir(tool_name).join(TOOL_ENTRY_FILE)
     }
 
     pub fn local_tools(&self) -> Result<Vec<LocalTool>> {
@@ -437,6 +450,23 @@ impl GlobalHome {
 
         let mut tools = Vec::new();
         collect_local_tools(&tools_dir, &tools_dir, &mut tools)?;
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(tools)
+    }
+
+    pub fn kit_tools_in_namespaces(&self, namespaces: &[&str]) -> Result<Vec<LocalTool>> {
+        let kit_dir = self.kit_dir();
+        if !kit_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut tools = Vec::new();
+        for namespace in namespaces {
+            let namespace_dir = kit_dir.join(namespace);
+            if namespace_dir.exists() {
+                collect_local_tools(&kit_dir, &namespace_dir, &mut tools)?;
+            }
+        }
         tools.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(tools)
     }
