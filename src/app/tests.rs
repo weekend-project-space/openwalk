@@ -791,7 +791,7 @@ fn tool_list_includes_only_supported_kit_namespaces() {
         fs::write(entry, body).expect("kit tool should be written");
     }
 
-    let entries = list::collect_tool_entries(&workspace, &global_home, None)
+    let entries = list::collect_tool_entries(&workspace, &global_home, None, false)
         .expect("tool list entries should load");
     let kit_names = entries
         .iter()
@@ -817,6 +817,7 @@ fn tool_list_filters_by_source_and_shows_kit_alias() {
         &workspace,
         &global_home,
         Some(crate::cli::ToolListSourceFilter::Kit),
+        false,
     )
     .expect("filtered tool list entries should load");
     let lines = render_tool_list_lines(&entries);
@@ -828,6 +829,39 @@ fn tool_list_filters_by_source_and_shows_kit_alias() {
     assert_eq!(lines[0], "SOURCE  USAGE                DESCRIPTION");
     assert!(lines[1].contains("kit"));
     assert!(lines[1].contains("search (sys/search)"));
+}
+
+#[test]
+fn tool_list_hides_builtin_entries_by_default() {
+    let (_workspace_sandbox, workspace) = initialized_workspace();
+    let (_global_sandbox, global_home) = initialized_global_home();
+
+    let entries = list::collect_tool_entries(&workspace, &global_home, None, false)
+        .expect("default tool list entries should load");
+
+    assert!(entries.iter().all(|entry| entry.source != "builtin"));
+}
+
+#[test]
+fn tool_list_includes_builtin_entries_with_all_or_source_filter() {
+    let (_workspace_sandbox, workspace) = initialized_workspace();
+    let (_global_sandbox, global_home) = initialized_global_home();
+
+    let all_entries = list::collect_tool_entries(&workspace, &global_home, None, true)
+        .expect("all tool list entries should load");
+    let builtin_entries = list::collect_tool_entries(
+        &workspace,
+        &global_home,
+        Some(crate::cli::ToolListSourceFilter::Builtin),
+        false,
+    )
+    .expect("builtin tool list entries should load");
+
+    assert!(all_entries.iter().any(|entry| entry.source == "builtin"));
+    assert!(!builtin_entries.is_empty());
+    assert!(builtin_entries
+        .iter()
+        .all(|entry| entry.source == "builtin"));
 }
 
 #[test]

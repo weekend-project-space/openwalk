@@ -20,9 +20,10 @@ pub(super) fn list_tools(
     global_home: &GlobalHome,
     format: String,
     source: Option<ToolListSourceFilter>,
+    all: bool,
 ) -> Result<()> {
     let output_format = parse_output_format(&format)?;
-    let entries = collect_tool_entries(workspace, global_home, source)?;
+    let entries = collect_tool_entries(workspace, global_home, source, all)?;
 
     let payload = match output_format {
         OutputFormat::Text | OutputFormat::Md => {
@@ -38,32 +39,41 @@ pub(super) fn collect_tool_entries(
     workspace: &Workspace,
     global_home: &GlobalHome,
     source: Option<ToolListSourceFilter>,
+    all: bool,
 ) -> Result<Vec<ToolListEntry>> {
     let mut entries = builtin_entries();
     entries.extend(workspace_tool_entries(workspace)?);
     entries.extend(global_tool_entries(global_home)?);
     entries.extend(kit_tool_entries(global_home)?);
-    Ok(filter_tool_entries(entries, source))
+    Ok(filter_tool_entries(entries, source, all))
 }
 
 fn filter_tool_entries(
     entries: Vec<ToolListEntry>,
     source: Option<ToolListSourceFilter>,
+    all: bool,
 ) -> Vec<ToolListEntry> {
-    let Some(source) = source else {
-        return entries;
-    };
+    if let Some(source) = source {
+        let expected = match source {
+            ToolListSourceFilter::Builtin => "builtin",
+            ToolListSourceFilter::Workspace => "workspace",
+            ToolListSourceFilter::Global => "global",
+            ToolListSourceFilter::Kit => "kit",
+        };
 
-    let expected = match source {
-        ToolListSourceFilter::Builtin => "builtin",
-        ToolListSourceFilter::Workspace => "workspace",
-        ToolListSourceFilter::Global => "global",
-        ToolListSourceFilter::Kit => "kit",
+        return entries
+            .into_iter()
+            .filter(|entry| entry.source == expected)
+            .collect();
+    }
+
+    if all {
+        return entries;
     };
 
     entries
         .into_iter()
-        .filter(|entry| entry.source == expected)
+        .filter(|entry| entry.source != "builtin")
         .collect()
 }
 

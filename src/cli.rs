@@ -115,7 +115,7 @@ pub enum ToolCommand {
     //     /// Tool package name, for example browser-tools
     //     package: String,
     // },
-    /// List runnable built-in, workspace, global, and kit tools.
+    /// List runnable workspace, global, and kit tools.
     Ls {
         /// Output format: text (default compact list), yaml, md, or json.
         #[arg(short = 'f', long = "format", default_value = "text")]
@@ -124,6 +124,10 @@ pub enum ToolCommand {
         /// Filter tools by source.
         #[arg(long = "source", value_enum)]
         source: Option<ToolListSourceFilter>,
+
+        /// Include built-in host functions.
+        #[arg(long)]
+        all: bool,
     },
     /// Show usage and metadata for a built-in tool, installed tool, or local Scheme script.
     Info {
@@ -297,10 +301,16 @@ mod tests {
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::Ls { format, source },
+                command:
+                    ToolCommand::Ls {
+                        format,
+                        source,
+                        all,
+                    },
             } => {
                 assert_eq!(format, "json");
                 assert_eq!(source, None);
+                assert!(!all);
             }
             other => panic!("expected tool list command, got {other:?}"),
         }
@@ -313,10 +323,38 @@ mod tests {
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::Ls { format, source },
+                command:
+                    ToolCommand::Ls {
+                        format,
+                        source,
+                        all,
+                    },
             } => {
                 assert_eq!(format, "text");
                 assert_eq!(source, Some(ToolListSourceFilter::Kit));
+                assert!(!all);
+            }
+            other => panic!("expected tool list command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_tool_list_all_flag() {
+        let cli = Cli::try_parse_from(["openwalk", "tool", "ls", "--all"])
+            .expect("tool list all flag should parse");
+
+        match cli.command {
+            Command::Tool {
+                command:
+                    ToolCommand::Ls {
+                        format,
+                        source,
+                        all,
+                    },
+            } => {
+                assert_eq!(format, "text");
+                assert_eq!(source, None);
+                assert!(all);
             }
             other => panic!("expected tool list command, got {other:?}"),
         }
