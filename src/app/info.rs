@@ -68,7 +68,7 @@ fn display_tool_source(source: &str) -> String {
 pub(super) fn print_tool_info_view(format: OutputFormat, view: &ToolInfoView) -> Result<()> {
     match format {
         OutputFormat::Json => print_execution_result(format, &serde_json::to_value(view)?),
-        OutputFormat::Yaml => {
+        OutputFormat::Text | OutputFormat::Yaml => {
             print!("{}", render_tool_help_text(view));
             Ok(())
         }

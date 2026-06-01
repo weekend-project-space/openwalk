@@ -93,7 +93,7 @@ fn handle_tool_command(
         // ToolCommand::Remove { package } => uninstall_package(workspace, package),
         // ToolCommand::Install { package } => install_global_package(global_home, package),
         // ToolCommand::Uninstall { package } => uninstall_global_package(global_home, package),
-        ToolCommand::Ls { format } => list_tools(workspace, global_home, format),
+        ToolCommand::Ls { format, source } => list_tools(workspace, global_home, format, source),
         ToolCommand::Info { tool, format } => show_tool_info(workspace, global_home, tool, format),
     }
 }

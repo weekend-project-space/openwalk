@@ -760,17 +760,20 @@ fn render_tool_list_lines_aligns_usage_column() {
             usage: "browser-open <url>".to_string(),
             description: "打开浏览器并导航".to_string(),
             source: "builtin".to_string(),
+            alias: Vec::new(),
         },
         ToolListEntry {
             name: "tab-list".to_string(),
             usage: "tab-list".to_string(),
             description: "列出所有标签页".to_string(),
             source: "builtin".to_string(),
+            alias: Vec::new(),
         },
     ]);
 
-    assert_eq!(lines[0], "browser-open <url>  打开浏览器并导航");
-    assert_eq!(lines[1], "tab-list            列出所有标签页");
+    assert_eq!(lines[0], "SOURCE   USAGE               DESCRIPTION");
+    assert_eq!(lines[1], "builtin  browser-open <url>  打开浏览器并导航");
+    assert_eq!(lines[2], "builtin  tab-list            列出所有标签页");
 }
 
 #[test]
@@ -788,7 +791,7 @@ fn tool_list_includes_only_supported_kit_namespaces() {
         fs::write(entry, body).expect("kit tool should be written");
     }
 
-    let entries = list::collect_tool_entries(&workspace, &global_home)
+    let entries = list::collect_tool_entries(&workspace, &global_home, None)
         .expect("tool list entries should load");
     let kit_names = entries
         .iter()
@@ -799,6 +802,32 @@ fn tool_list_includes_only_supported_kit_namespaces() {
     assert!(kit_names.contains(&"sys/search"));
     assert!(kit_names.contains(&"debug/echo"));
     assert!(!kit_names.contains(&"future/hidden"));
+}
+
+#[test]
+fn tool_list_filters_by_source_and_shows_kit_alias() {
+    let (_workspace_sandbox, workspace) = initialized_workspace();
+    let (_global_sandbox, global_home) = initialized_global_home();
+    let entry = global_home.kit_tool_entry_path("sys/search");
+    fs::create_dir_all(entry.parent().expect("kit tool entry should have parent"))
+        .expect("kit tool dir should be created");
+    fs::write(&entry, r#"(define (main args) "sys")"#).expect("kit tool should be written");
+
+    let entries = list::collect_tool_entries(
+        &workspace,
+        &global_home,
+        Some(crate::cli::ToolListSourceFilter::Kit),
+    )
+    .expect("filtered tool list entries should load");
+    let lines = render_tool_list_lines(&entries);
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "sys/search");
+    assert_eq!(entries[0].source, "kit");
+    assert_eq!(entries[0].alias, vec!["search"]);
+    assert_eq!(lines[0], "SOURCE  USAGE                DESCRIPTION");
+    assert!(lines[1].contains("kit"));
+    assert!(lines[1].contains("search (sys/search)"));
 }
 
 #[test]

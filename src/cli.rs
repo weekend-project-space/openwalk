@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 // Parsing stays intentionally thin in this module so command behavior can evolve in `app.rs`
 // without coupling execution logic to Clap-specific details.
@@ -85,6 +85,14 @@ pub struct DaemonArgs {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ToolListSourceFilter {
+    Workspace,
+    Global,
+    Kit,
+    Builtin,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ToolCommand {
     // /// Add a tool package into the current workspace.
@@ -109,9 +117,13 @@ pub enum ToolCommand {
     // },
     /// List runnable built-in, workspace, global, and kit tools.
     Ls {
-        /// Output format: yaml (default compact list), md, or json.
-        #[arg(short = 'f', long = "format", default_value = "yaml")]
+        /// Output format: text (default compact list), yaml, md, or json.
+        #[arg(short = 'f', long = "format", default_value = "text")]
         format: String,
+
+        /// Filter tools by source.
+        #[arg(long = "source", value_enum)]
+        source: Option<ToolListSourceFilter>,
     },
     /// Show usage and metadata for a built-in tool, installed tool, or local Scheme script.
     Info {
@@ -285,9 +297,26 @@ mod tests {
 
         match cli.command {
             Command::Tool {
-                command: ToolCommand::Ls { format },
+                command: ToolCommand::Ls { format, source },
             } => {
                 assert_eq!(format, "json");
+                assert_eq!(source, None);
+            }
+            other => panic!("expected tool list command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_tool_list_source_filter() {
+        let cli = Cli::try_parse_from(["openwalk", "tool", "ls", "--source=kit"])
+            .expect("tool list source filter should parse");
+
+        match cli.command {
+            Command::Tool {
+                command: ToolCommand::Ls { format, source },
+            } => {
+                assert_eq!(format, "text");
+                assert_eq!(source, Some(ToolListSourceFilter::Kit));
             }
             other => panic!("expected tool list command, got {other:?}"),
         }

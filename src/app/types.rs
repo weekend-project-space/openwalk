@@ -11,6 +11,8 @@ pub(super) struct ToolListEntry {
     pub(super) usage: String,
     pub(super) description: String,
     pub(super) source: String,
+    #[serde(rename = "alias", skip_serializing_if = "Vec::is_empty")]
+    pub(super) alias: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]

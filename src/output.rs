@@ -5,6 +5,7 @@ use serde_json::Value as JsonValue;
 pub enum OutputFormat {
     #[default]
     Yaml,
+    Text,
     Md,
     Json,
 }
@@ -13,9 +14,10 @@ pub fn parse_output_format(raw: &str) -> Result<OutputFormat> {
     let value = raw.trim();
     match value {
         "yaml" => Ok(OutputFormat::Yaml),
+        "text" => Ok(OutputFormat::Text),
         "md" => Ok(OutputFormat::Md),
         "json" => Ok(OutputFormat::Json),
-        _ => bail!("unsupported output format `{value}`. Supported formats: yaml, md, json"),
+        _ => bail!("unsupported output format `{value}`. Supported formats: text, yaml, md, json"),
     }
 }
 
@@ -29,11 +31,40 @@ pub fn format_execution_result(format: OutputFormat, payload: &JsonValue) -> Res
                 serde_yaml::to_string(payload).context("failed to serialize execution output")?;
             Ok(yaml)
         }
+        OutputFormat::Text => format_text_execution_result(payload),
         OutputFormat::Md => format_markdown_execution_result(payload),
         OutputFormat::Json => {
             let json = serde_json::to_string_pretty(payload)
                 .context("failed to serialize execution output")?;
             Ok(json)
+        }
+    }
+}
+
+fn format_text_execution_result(payload: &JsonValue) -> Result<String> {
+    match payload {
+        JsonValue::Array(items) if items.iter().all(JsonValue::is_string) => {
+            let mut out = items
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            Ok(out)
+        }
+        JsonValue::String(text) => {
+            let mut out = text.clone();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            Ok(out)
+        }
+        _ => {
+            let yaml =
+                serde_yaml::to_string(payload).context("failed to serialize execution output")?;
+            Ok(yaml)
         }
     }
 }
@@ -143,5 +174,19 @@ mod tests {
         assert!(md.contains("# Execution Result"));
         assert!(md.contains("## Args"));
         assert!(md.contains("## Result"));
+    }
+
+    #[test]
+    fn format_text_prints_string_arrays_as_lines() {
+        let input = json!(["one", "two"]);
+
+        let text = format_execution_result(OutputFormat::Text, &input).unwrap();
+
+        assert_eq!(text, "one\ntwo\n");
+    }
+
+    #[test]
+    fn parse_output_format_accepts_text() {
+        assert_eq!(parse_output_format("text").unwrap(), OutputFormat::Text);
     }
 }
