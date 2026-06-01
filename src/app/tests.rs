@@ -754,7 +754,7 @@ fn tool_help_request_requires_help_as_the_only_tool_arg() {
 
 #[test]
 fn render_tool_list_lines_aligns_usage_column() {
-    let lines = render_tool_list_lines(&[
+    let entries = [
         ToolListEntry {
             name: "browser-open".to_string(),
             usage: "browser-open <url>".to_string(),
@@ -769,11 +769,29 @@ fn render_tool_list_lines_aligns_usage_column() {
             source: "builtin".to_string(),
             alias: Vec::new(),
         },
-    ]);
+    ];
+    let lines = render_tool_list_lines(&entries, true);
 
     assert_eq!(lines[0], "SOURCE   USAGE               DESCRIPTION");
     assert_eq!(lines[1], "builtin  browser-open <url>  打开浏览器并导航");
     assert_eq!(lines[2], "builtin  tab-list            列出所有标签页");
+}
+
+#[test]
+fn render_tool_list_lines_can_hide_source_column() {
+    let lines = render_tool_list_lines(
+        &[ToolListEntry {
+            name: "sys/search".to_string(),
+            usage: "sys/search".to_string(),
+            description: "Kit Scheme tool".to_string(),
+            source: "kit".to_string(),
+            alias: vec!["search".to_string()],
+        }],
+        false,
+    );
+
+    assert_eq!(lines[0], "USAGE                DESCRIPTION");
+    assert_eq!(lines[1], "search (sys/search)  Kit Scheme tool");
 }
 
 #[test]
@@ -820,7 +838,7 @@ fn tool_list_filters_by_source_and_shows_kit_alias() {
         false,
     )
     .expect("filtered tool list entries should load");
-    let lines = render_tool_list_lines(&entries);
+    let lines = render_tool_list_lines(&entries, true);
 
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "sys/search");

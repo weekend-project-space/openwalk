@@ -26,9 +26,10 @@ pub(super) fn list_tools(
     let entries = collect_tool_entries(workspace, global_home, source, all)?;
 
     let payload = match output_format {
-        OutputFormat::Text | OutputFormat::Md => {
-            serde_json::to_value(render_tool_list_lines(&entries))?
-        }
+        OutputFormat::Text | OutputFormat::Md => serde_json::to_value(render_tool_list_lines(
+            &entries,
+            should_show_source(source, all),
+        ))?,
         OutputFormat::Yaml | OutputFormat::Json => serde_json::to_value(entries)?,
     };
 
@@ -75,6 +76,10 @@ fn filter_tool_entries(
         .into_iter()
         .filter(|entry| entry.source != "builtin")
         .collect()
+}
+
+fn should_show_source(source: Option<ToolListSourceFilter>, all: bool) -> bool {
+    source.is_some() || all
 }
 
 fn builtin_entries() -> Vec<ToolListEntry> {
@@ -179,7 +184,7 @@ fn kit_tool_entries(global_home: &GlobalHome) -> Result<Vec<ToolListEntry>> {
     Ok(entries)
 }
 
-pub(super) fn render_tool_list_lines(entries: &[ToolListEntry]) -> Vec<String> {
+pub(super) fn render_tool_list_lines(entries: &[ToolListEntry], show_source: bool) -> Vec<String> {
     let source_width = entries
         .iter()
         .map(|entry| entry.source.chars().count())
@@ -193,17 +198,25 @@ pub(super) fn render_tool_list_lines(entries: &[ToolListEntry]) -> Vec<String> {
         .unwrap_or(0);
     let usage_width = usage_width.max("USAGE".len());
 
-    let mut lines = vec![format!(
-        "{:<source_width$}  {:<usage_width$}  DESCRIPTION",
-        "SOURCE",
-        "USAGE",
-        source_width = source_width,
-        usage_width = usage_width
-    )];
+    let mut lines = if show_source {
+        vec![format!(
+            "{:<source_width$}  {:<usage_width$}  DESCRIPTION",
+            "SOURCE",
+            "USAGE",
+            source_width = source_width,
+            usage_width = usage_width
+        )]
+    } else {
+        vec![format!(
+            "{:<usage_width$}  DESCRIPTION",
+            "USAGE",
+            usage_width = usage_width
+        )]
+    };
 
     lines.extend(entries.iter().map(|entry| {
         let usage = display_tool_usage(entry);
-        if entry.description.is_empty() {
+        if show_source && entry.description.is_empty() {
             format!(
                 "{:<source_width$}  {:<usage_width$}",
                 entry.source,
@@ -211,13 +224,22 @@ pub(super) fn render_tool_list_lines(entries: &[ToolListEntry]) -> Vec<String> {
                 source_width = source_width,
                 usage_width = usage_width
             )
-        } else {
+        } else if show_source {
             format!(
                 "{:<source_width$}  {:<usage_width$}  {}",
                 entry.source,
                 usage,
                 entry.description,
                 source_width = source_width,
+                usage_width = usage_width
+            )
+        } else if entry.description.is_empty() {
+            format!("{:<usage_width$}", usage, usage_width = usage_width)
+        } else {
+            format!(
+                "{:<usage_width$}  {}",
+                usage,
+                entry.description,
                 usage_width = usage_width
             )
         }
