@@ -215,7 +215,8 @@ async fn run_local_executes_scheme_script() {
     fs::write(&script_path, "(+ 19 23)").expect("script should be written");
 
     let result = run_local(ToolExecArgs {
-        tool: script_path.display().to_string(),
+        tool: Some(script_path.display().to_string()),
+        help: false,
         args: Vec::new(),
     })
     .await;
@@ -241,7 +242,8 @@ async fn run_local_resolves_workspace_tool_names() {
     fs::write(tool_dir.join("main.scm"), "(+ 20 22)").expect("script should be written");
 
     let result = run_local(ToolExecArgs {
-        tool: "smoke".to_string(),
+        tool: Some("smoke".to_string()),
+        help: false,
         args: Vec::new(),
     })
     .await;
@@ -1061,7 +1063,8 @@ async fn exec_tool_auto_installs_unknown_tools_from_hub() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "remote.browser.open".to_string(),
+            tool: Some("remote.browser.open".to_string()),
+            help: false,
             args: vec!["https://example.com".to_string()],
         },
     )
@@ -1109,7 +1112,8 @@ async fn exec_tool_auto_installs_namespaced_tools_from_hub() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "v2ex/hot".to_string(),
+            tool: Some("v2ex/hot".to_string()),
+            help: false,
             args: Vec::new(),
         },
     )
@@ -1152,7 +1156,8 @@ async fn app_run_syncs_kit_on_startup_and_executes_explicit_kit_tool() {
 
     let result = run(Cli {
         command: crate::cli::Command::Exec(ToolExecArgs {
-            tool: "sys/search".to_string(),
+            tool: Some("sys/search".to_string()),
+            help: false,
             args: Vec::new(),
         }),
     })
@@ -1200,7 +1205,8 @@ async fn exec_tool_prefers_global_tools_over_kit_tools() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "sys/search".to_string(),
+            tool: Some("sys/search".to_string()),
+            help: false,
             args: Vec::new(),
         },
     )
@@ -1231,7 +1237,8 @@ async fn exec_tool_resolves_kit_short_alias_after_workspace_and_global_tools() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "search".to_string(),
+            tool: Some("search".to_string()),
+            help: false,
             args: Vec::new(),
         },
     )
@@ -1274,7 +1281,8 @@ async fn exec_tool_prefers_workspace_tool_over_kit_short_alias() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "search".to_string(),
+            tool: Some("search".to_string()),
+            help: false,
             args: Vec::new(),
         },
     )
@@ -1295,7 +1303,8 @@ async fn exec_tool_executes_builtin_host_function() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "time-sleep".to_string(),
+            tool: Some("time-sleep".to_string()),
+            help: false,
             args: vec!["0".to_string()],
         },
     )
@@ -1340,7 +1349,8 @@ async fn exec_tool_allows_global_packages_without_workspace_init() {
         &workspace,
         &global_home,
         ToolExecArgs {
-            tool: "browser-tools".to_string(),
+            tool: Some("browser-tools".to_string()),
+            help: false,
             args: vec!["https://example.com".to_string()],
         },
     )
@@ -1361,7 +1371,8 @@ async fn run_local_rejects_builtin_host_function_names() {
     env::set_current_dir(&sandbox.path).expect("should change cwd for the test");
 
     let result = run_local(ToolExecArgs {
-        tool: "browser-open".to_string(),
+        tool: Some("browser-open".to_string()),
+        help: false,
         args: vec!["https://example.com".to_string()],
     })
     .await;

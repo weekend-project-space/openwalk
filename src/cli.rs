@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 // Parsing stays intentionally thin in this module so command behavior can evolve in `app.rs`
 // without coupling execution logic to Clap-specific details.
@@ -22,8 +22,6 @@ pub enum Command {
     // Init(InitArgs),
     /// Install tools declared in openwalk.json
     Install(ProjectInstallArgs),
-    ///  Run a workspace tool or local Scheme script
-    // Run(ToolExecArgs),
     /// Execute a built-in tool, script, or installed tool
     Exec(ToolExecArgs),
     ///  List, inspect, add, install, and remove tools
@@ -64,7 +62,11 @@ pub struct ProjectInstallArgs {}
 #[command(disable_help_flag = true)]
 pub struct ToolExecArgs {
     /// Scheme script path or tool name, for example ./demo.scm
-    pub tool: String,
+    pub tool: Option<String>,
+
+    /// Show help for the exec command itself. Use `openwalk exec <tool> --help` for tool help.
+    #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+    pub help: bool,
 
     // #[arg(short = 's', long = "session", default_value = "default")]
     // pub session: String,
@@ -75,6 +77,15 @@ pub struct ToolExecArgs {
     // Keep the remainder untouched so tool-specific flags are not parsed as CLI flags.
     #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
     pub args: Vec<String>,
+}
+
+pub fn render_exec_help() -> &'static str {
+    "Execute a built-in tool, local script, workspace/global tool, or kit tool.\n\n\
+Usage:\n  openwalk exec <tool> [args...]\n\n\
+Arguments:\n  <tool>      Built-in tool name, tool ref, or local .scm path\n  [args...]   Arguments and tool-specific options passed to the tool\n\n\
+Common options after <tool>:\n  -s, --session <name>       Browser session name\n  -f, --format <format>      Output format: text, yaml, md, or json\n  --all                      Include execution metadata in the output\n  --help                     Show help for the selected tool\n\n\
+Discover tools:\n  openwalk tool ls           List workspace, global, and kit tools\n  openwalk tool ls --all     Include built-in tools\n  openwalk tool info <tool>  Show usage, arguments, options, returns, and examples\n\n\
+Examples:\n  openwalk exec browser-open https://example.com -s=demo --headed\n  openwalk exec page-snapshot -s=demo --format=json\n  openwalk exec browser-open --help\n  openwalk exec search \"rust mcp\"\n"
 }
 
 #[derive(Debug, Args)]
@@ -245,7 +256,8 @@ mod tests {
 
         match cli.command {
             Command::Exec(args) => {
-                assert_eq!(args.tool, "browser-open");
+                assert_eq!(args.tool.as_deref(), Some("browser-open"));
+                assert!(!args.help);
                 assert_eq!(
                     args.args,
                     vec![
@@ -273,7 +285,8 @@ mod tests {
 
         match cli.command {
             Command::Exec(args) => {
-                assert_eq!(args.tool, "browser-open");
+                assert_eq!(args.tool.as_deref(), Some("browser-open"));
+                assert!(!args.help);
                 assert_eq!(args.args, vec!["-s=parallel-a", "https://example.com"]);
             }
             other => panic!("expected exec command, got {other:?}"),
@@ -287,8 +300,39 @@ mod tests {
 
         match cli.command {
             Command::Exec(args) => {
-                assert_eq!(args.tool, "browser-open");
-                assert_eq!(args.args, vec!["--help"]);
+                assert_eq!(args.tool.as_deref(), Some("browser-open"));
+                assert!(args.help);
+                assert!(args.args.is_empty());
+            }
+            other => panic!("expected exec command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_exec_command_help_before_tool() {
+        let cli = Cli::try_parse_from(["openwalk", "exec", "--help"])
+            .expect("exec command help should parse");
+
+        match cli.command {
+            Command::Exec(args) => {
+                assert_eq!(args.tool, None);
+                assert!(args.help);
+                assert!(args.args.is_empty());
+            }
+            other => panic!("expected exec command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_exec_command_without_tool_for_app_level_help() {
+        let cli =
+            Cli::try_parse_from(["openwalk", "exec"]).expect("bare exec should parse cleanly");
+
+        match cli.command {
+            Command::Exec(args) => {
+                assert_eq!(args.tool, None);
+                assert!(!args.help);
+                assert!(args.args.is_empty());
             }
             other => panic!("expected exec command, got {other:?}"),
         }

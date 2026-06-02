@@ -8,7 +8,7 @@ use crate::{
         attach_browser_session_with_options, ensure_browser_session_with_options, BrowserService,
         BrowserSessionLaunchOptions, EphemeralLaunchOptions,
     },
-    cli::ToolExecArgs,
+    cli::{render_exec_help, ToolExecArgs},
     daemon,
     output::print_execution_result,
     runtime_args::{
@@ -31,11 +31,21 @@ use super::{
 pub(super) async fn run_local(args: ToolExecArgs) -> Result<()> {
     let ToolExecArgs {
         tool,
+        help,
         args: cli_args,
     } = args;
 
+    let Some(tool) = tool else {
+        print!("{}", render_exec_help());
+        return Ok(());
+    };
+
     let workspace = Workspace::discover()?;
     let global_home = GlobalHome::discover()?;
+    if help {
+        return show_tool_info(&workspace, &global_home, tool, "yaml".to_string());
+    }
+
     if is_tool_help_request(&cli_args) {
         return show_tool_info(&workspace, &global_home, tool, "yaml".to_string());
     }
@@ -64,8 +74,18 @@ pub(super) async fn exec_tool(
 ) -> Result<()> {
     let ToolExecArgs {
         tool,
+        help,
         args: cli_args,
     } = args;
+
+    let Some(tool) = tool else {
+        print!("{}", render_exec_help());
+        return Ok(());
+    };
+
+    if help {
+        return show_tool_info(workspace, global_home, tool, "yaml".to_string());
+    }
 
     if is_tool_help_request(&cli_args) {
         return show_tool_info(workspace, global_home, tool, "yaml".to_string());
