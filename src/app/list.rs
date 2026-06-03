@@ -248,11 +248,15 @@ pub(super) fn render_tool_list_lines(entries: &[ToolListEntry], show_source: boo
 }
 
 fn display_tool_usage(entry: &ToolListEntry) -> String {
-    if let Some(alias) = entry.alias.first() {
-        format!("{alias} ({})", entry.usage)
-    } else {
-        entry.usage.clone()
-    }
+    let Some(alias) = entry.alias.first() else {
+        return entry.usage.clone();
+    };
+
+    entry
+        .usage
+        .strip_prefix(entry.name.as_str())
+        .map(|suffix| format!("{alias}{suffix}"))
+        .unwrap_or_else(|| alias.clone())
 }
 
 fn kit_alias(tool_name: &str) -> Vec<String> {

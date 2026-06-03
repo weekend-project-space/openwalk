@@ -784,7 +784,7 @@ fn render_tool_list_lines_can_hide_source_column() {
     let lines = render_tool_list_lines(
         &[ToolListEntry {
             name: "sys/search".to_string(),
-            usage: "sys/search".to_string(),
+            usage: "sys/search <query> [limit]".to_string(),
             description: "Kit Scheme tool".to_string(),
             source: "kit".to_string(),
             alias: vec!["search".to_string()],
@@ -792,8 +792,8 @@ fn render_tool_list_lines_can_hide_source_column() {
         false,
     );
 
-    assert_eq!(lines[0], "USAGE                DESCRIPTION");
-    assert_eq!(lines[1], "search (sys/search)  Kit Scheme tool");
+    assert_eq!(lines[0], "USAGE                   DESCRIPTION");
+    assert_eq!(lines[1], "search <query> [limit]  Kit Scheme tool");
 }
 
 #[test]
@@ -846,9 +846,10 @@ fn tool_list_filters_by_source_and_shows_kit_alias() {
     assert_eq!(entries[0].name, "sys/search");
     assert_eq!(entries[0].source, "kit");
     assert_eq!(entries[0].alias, vec!["search"]);
-    assert_eq!(lines[0], "SOURCE  USAGE                DESCRIPTION");
+    assert_eq!(lines[0], "SOURCE  USAGE   DESCRIPTION");
     assert!(lines[1].contains("kit"));
-    assert!(lines[1].contains("search (sys/search)"));
+    assert!(lines[1].contains("search"));
+    assert!(!lines[1].contains("(sys/search)"));
 }
 
 #[test]
