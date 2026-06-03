@@ -1,32 +1,29 @@
 use anyhow::Result;
 use scheme4r::Value;
 
+use super::catalog::{builtin_tool_spec_for, BuiltinCliArgParser};
+
 pub fn cli_args_to_scheme_values(name: &str, args: &[String]) -> Result<Vec<Value>> {
-    match name {
-        "browser-open" => args
+    let parser = builtin_tool_spec_for(name)
+        .map(|spec| spec.cli_args)
+        .unwrap_or(BuiltinCliArgParser::Strings);
+
+    match parser {
+        BuiltinCliArgParser::BrowserOpen => args
             .iter()
             .enumerate()
             .map(|(index, value)| cli_browser_open_arg(name, index, value))
             .collect(),
-        "time-sleep" => args
+        BuiltinCliArgParser::Number { label } => args
             .iter()
-            .map(|value| cli_number_arg(name, value, "ms"))
+            .map(|value| cli_number_arg(name, value, label))
             .collect(),
-        "inspect-pick" => args
-            .iter()
-            .map(|value| cli_number_arg(name, value, "timeout-ms"))
-            .collect(),
-        "page-scroll-to" | "page-scroll-by" | "browser-resize" => args
+        BuiltinCliArgParser::XyNumbers => args
             .iter()
             .enumerate()
             .map(|(index, value)| cli_number_arg(name, value, cli_xy_label(index)))
             .collect(),
-        "mouse-move" | "mouse-click" | "touch-tap" => args
-            .iter()
-            .enumerate()
-            .map(|(index, value)| cli_number_arg(name, value, cli_xy_label(index)))
-            .collect(),
-        "mouse-down" | "mouse-up" => args
+        BuiltinCliArgParser::MouseDownUp => args
             .iter()
             .enumerate()
             .map(|(index, value)| {
@@ -37,12 +34,12 @@ pub fn cli_args_to_scheme_values(name: &str, args: &[String]) -> Result<Vec<Valu
                 }
             })
             .collect(),
-        "mouse-wheel" => args
+        BuiltinCliArgParser::MouseWheel => args
             .iter()
             .enumerate()
             .map(|(index, value)| cli_number_arg(name, value, cli_mouse_wheel_label(index)))
             .collect(),
-        _ => Ok(args.iter().cloned().map(Value::string).collect()),
+        BuiltinCliArgParser::Strings => Ok(args.iter().cloned().map(Value::string).collect()),
     }
 }
 

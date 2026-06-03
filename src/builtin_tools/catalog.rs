@@ -1,65 +1,48 @@
 use crate::tool_metadata::{ToolArgument, ToolMetadata, ToolReturn};
 
-pub const SCHEME_BUILTINS: &[&str] = &[
-    "browser-open",
-    "browser-list",
-    "page-goto",
-    "page-back",
-    "page-forward",
-    "page-reload",
-    "element-click",
-    "element-double-click",
-    "element-right-click",
-    "element-type",
-    "element-fill",
-    "keyboard-press",
-    "keyboard-type",
-    "keyboard-down",
-    "keyboard-up",
-    "element-select",
-    "element-check",
-    "element-uncheck",
-    "time-sleep",
-    "js-wait",
-    "element-exists",
-    "element-hover",
-    "element-upload",
-    "element-drag",
-    "page-snapshot",
-    "page-screenshot",
-    "element-screenshot",
-    "page-pdf",
-    "js-eval",
-    "page-wait-navigation",
-    "page-scroll-to",
-    "page-scroll-by",
-    "browser-resize",
-    "tab-list",
-    "tab-new",
-    "tab-select",
-    "tab-close",
-    "browser-version",
-    "performance-metrics",
-    "network-log",
-    "dialog-accept",
-    "dialog-dismiss",
-    "console",
-    "console-clear",
-    "inspect-info",
-    "inspect-highlight",
-    "inspect-hide-highlight",
-    "inspect-pick",
-    "tracing-start",
-    "tracing-stop",
-    "mouse-move",
-    "mouse-click",
-    "mouse-down",
-    "mouse-up",
-    "mouse-wheel",
-    "touch-tap",
-    "cdp-call",
-    "browser-close",
-];
+use super::spec::builtin_tool_entries;
+use BuiltinCliArgParser::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinCliArgParser {
+    Strings,
+    BrowserOpen,
+    Number { label: &'static str },
+    XyNumbers,
+    MouseDownUp,
+    MouseWheel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinToolSpec {
+    pub name: &'static str,
+    pub cli_args: BuiltinCliArgParser,
+}
+
+const fn builtin_tool_spec(name: &'static str, cli_args: BuiltinCliArgParser) -> BuiltinToolSpec {
+    BuiltinToolSpec { name, cli_args }
+}
+
+macro_rules! define_builtin_names {
+    ($(($name:literal, $cli_args:expr, $handler:ident)),+ $(,)?) => {
+        pub const SCHEME_BUILTINS: &[&str] = &[$($name),+];
+    };
+}
+
+macro_rules! define_builtin_specs {
+    ($(($name:literal, $cli_args:expr, $handler:ident)),+ $(,)?) => {
+        pub const BUILTIN_TOOL_SPECS: &[BuiltinToolSpec] = &[
+            $(builtin_tool_spec($name, $cli_args)),+
+        ];
+    };
+}
+
+builtin_tool_entries!(define_builtin_names);
+builtin_tool_entries!(define_builtin_specs);
+
+pub fn builtin_tool_spec_for(name: &str) -> Option<&'static BuiltinToolSpec> {
+    BUILTIN_TOOL_SPECS.iter().find(|tool| tool.name == name)
+}
 
 pub fn builtin_tool_metadata(name: &str) -> Option<ToolMetadata> {
     if !SCHEME_BUILTINS.contains(&name) {

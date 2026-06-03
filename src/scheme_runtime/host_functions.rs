@@ -6,6 +6,7 @@ use scheme4r::{eval::Engine, runtime::BuiltinFn, Environment, SchemeError, Value
 use crate::workspace::GlobalHome;
 use crate::{
     browser::{list_browser_sessions, parse_mouse_button, BrowserClient, BrowserCommand},
+    builtin_tools::spec::builtin_tool_entries,
     value_codec::browser_value_to_scheme,
 };
 
@@ -66,7 +67,7 @@ macro_rules! define_browser_builtin {
 }
 
 macro_rules! register_browser_builtins {
-    ($env:expr, $( $name:literal => $func:ident ),* $(,)?) => {
+    ($env:expr, $(($name:literal, $cli_args:expr, $func:ident)),+ $(,)?) => {
         $(
             register_browser_builtin($env, $name, $func);
         )*
@@ -74,67 +75,7 @@ macro_rules! register_browser_builtins {
 }
 
 pub(super) fn register_browser_builtins(env: &mut Environment) {
-    register_browser_builtins!(
-        env,
-        "browser-open" => browser_open,
-        "browser-list" => browser_list,
-        "page-goto" => browser_goto,
-        "page-back" => browser_back,
-        "page-forward" => browser_forward,
-        "page-reload" => browser_reload,
-        "element-click" => browser_click,
-        "element-double-click" => browser_double_click,
-        "element-right-click" => browser_right_click,
-        "element-type" => browser_type,
-        "element-fill" => browser_fill,
-        "keyboard-press" => browser_press,
-        "keyboard-type" => browser_keyboard_type,
-        "keyboard-down" => browser_keyboard_down,
-        "keyboard-up" => browser_keyboard_up,
-        "element-select" => browser_select,
-        "element-check" => browser_check,
-        "element-uncheck" => browser_uncheck,
-        "time-sleep" => browser_wait_timeout,
-        "js-wait" => browser_wait_function,
-        "element-exists" => browser_exists,
-        "element-hover" => browser_hover,
-        "element-upload" => browser_upload,
-        "element-drag" => browser_drag,
-        "page-snapshot" => browser_page_snapshot,
-        "page-screenshot" => browser_screenshot,
-        "element-screenshot" => browser_element_screenshot,
-        "page-pdf" => browser_pdf,
-        "js-eval" => browser_eval,
-        "page-wait-navigation" => browser_wait_navigation,
-        "page-scroll-to" => browser_scroll_to,
-        "page-scroll-by" => browser_scroll_by,
-        "browser-resize" => browser_resize,
-        "tab-list" => tab_list,
-        "tab-new" => tab_new,
-        "tab-select" => tab_select,
-        "tab-close" => tab_close,
-        "browser-version" => browser_version,
-        "performance-metrics" => browser_performance_metrics,
-        "network-log" => browser_network_log,
-        "dialog-accept" => browser_dialog_accept,
-        "dialog-dismiss" => browser_dialog_dismiss,
-        "console" => browser_console,
-        "console-clear" => browser_console_clear,
-        "inspect-info" => browser_inspect_info,
-        "inspect-highlight" => browser_inspect_highlight,
-        "inspect-hide-highlight" => browser_inspect_hide_highlight,
-        "inspect-pick" => browser_inspect_pick,
-        "tracing-start" => browser_tracing_start,
-        "tracing-stop" => browser_tracing_stop,
-        "mouse-move" => browser_mouse_move,
-        "mouse-click" => browser_mouse_click,
-        "mouse-down" => browser_mouse_down,
-        "mouse-up" => browser_mouse_up,
-        "mouse-wheel" => browser_mouse_wheel,
-        "touch-tap" => browser_touch_tap,
-        "cdp-call" => browser_cdp,
-        "browser-close" => browser_close,
-    );
+    builtin_tool_entries!(register_browser_builtins, env);
 }
 
 fn register_browser_builtin(env: &mut Environment, scheme_name: &str, func: BuiltinFn) {
