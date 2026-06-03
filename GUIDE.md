@@ -41,11 +41,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -InstallDir C:\to
 ## Quick Start
 
 ```bash
-# Initialize the current project
-openwalk init
-
 # Show available tools
-openwalk tool list
+openwalk tool ls
 
 # Run a workspace tool
 openwalk exec hello-word OpenWalk
@@ -60,33 +57,25 @@ More commonly used capabilities are available in [openwalkhub](https://github.co
 
 ## Core Rules
 
-- `run` only runs local `.scm` files or workspace tools
 - `exec` can run built-in host functions, local `.scm` files, workspace tools, and global tools
 - If `exec` does not find a target locally, it will try to pull the tool from the hub into the current project and then execute it
-- Supported output formats are `yaml`, `md`, and `json`
-- `tool list` outputs a compact tool list by default, and `tool info` outputs a readable documentation page by default
+- Supported output formats are `text`, `yaml`, `md`, and `json`
+- `tool ls` outputs a compact tool list by default, and `tool info` outputs a readable documentation page by default
 - Browser state is persisted by default
 
 ## Core Commands
 
 | Command          | Usage                                  | Description                                                 |
 | ---------------- | -------------------------------------- | ----------------------------------------------------------- |
-| `init`           | `openwalk init`                        | Initialize the current project and create `openwalk.json` and `.openwalk/` |
 | `install`        | `openwalk install`                     | Install project tools declared in `openwalk.json -> tools`  |
-| `run`            | `openwalk run <tool-or-script>`        | Run a workspace tool or a local `.scm` file                 |
 | `exec`           | `openwalk exec <tool-or-script>`       | Execute a host function, script, workspace tool, or global tool |
-| `tool list`      | `openwalk tool list [-f <fmt>]`        | Show the list of directly executable tools                  |
+| `tool ls`        | `openwalk tool ls [-f <fmt>]`          | Show the list of directly executable tools                  |
 | `tool info`      | `openwalk tool info <tool> [-f <fmt>]` | Show usage and metadata for a tool                          |
-| `tool add`       | `openwalk tool add <package>`          | Install a tool into the current project                     |
-| `tool remove`    | `openwalk tool remove <package>`       | Remove a tool from the current project                      |
-| `tool install`   | `openwalk tool install <package>`      | Install a tool globally                                     |
-| `tool uninstall` | `openwalk tool uninstall <package>`    | Uninstall a tool globally                                   |
 
-## `run` and `exec`
+## `exec`
 
 | Command                  | Target                    | Resolution Order                                                                    |
 | ------------------------ | ------------------------- | ----------------------------------------------------------------------------------- |
-| `openwalk run <target>`  | Local script, workspace tool | Local `.scm` -> workspace tool                                                   |
 | `openwalk exec <target>` | Host function, script, tool | Local `.scm` -> workspace tool -> built-in host function -> global tool -> auto-pull into current project |
 
 Examples:
@@ -96,20 +85,20 @@ Examples:
 openwalk exec hello-word -- OpenWalk
 
 # Local script
-openwalk run ./demo.scm -- foo bar
+openwalk exec ./demo.scm -- foo bar
 
 # Built-in browser command
 openwalk exec browser-open https://example.com
 ```
 
-Note: built-in commands such as `browser-open` cannot be used with `run`.
+Note: `exec` is the single entry point for built-in tools, local scripts, workspace tools, global tools, and hub tools.
 
 ## Common Runtime Options
 
 | Option                           | Description                                                      |
 | -------------------------------- | ---------------------------------------------------------------- |
 | `-s <name>` / `--session <name>` | Specify a browser session                                        |
-| `-f <fmt>` / `--format <fmt>`    | Output format: `yaml`, `md`, `json`                             |
+| `-f <fmt>` / `--format <fmt>`    | Output format: `text`, `yaml`, `md`, `json`                     |
 | `--`                             | Stop parsing OpenWalk runtime options and pass the remaining arguments to the script as-is |
 
 If `OPENWALK_SESSION_NAME` is set, it is used as the default session. An explicit `-s` / `--session` flag takes precedence.
@@ -126,10 +115,10 @@ openwalk exec ./demo.scm -- -f=json
 
 ```bash
 # Output the compact list by default
-openwalk tool list
+openwalk tool ls
 
 # Return a structured object array
-openwalk tool list -f=json
+openwalk tool ls -f=json
 
 # Show the documentation page for a built-in tool
 openwalk tool info browser-open
@@ -156,13 +145,13 @@ openwalk tool info hello-word
 For a quick browsable capability overview:
 
 ```bash
-openwalk tool list
+openwalk tool ls
 ```
 
 For a structured capability overview:
 
 ```bash
-openwalk tool list -f=json
+openwalk tool ls -f=json
 ```
 
 ## Browser Sessions
@@ -228,7 +217,7 @@ Minimal example:
 Run locally:
 
 ```bash
-openwalk run ./demo.scm -- OpenWalk
+openwalk exec ./demo.scm -- OpenWalk
 ```
 
 Workspace tool path:
