@@ -11,7 +11,7 @@ openwalk exec <tool> [args...]
 当一个网页流程不该再停留在一次性脚本里，而应该被反复运行、查看、复用，甚至交给 Agent 调用时，就可以把它放进 OpenWalk。
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 openwalk tool ls
 
 openwalk exec bing/search "Claude Code" 5
@@ -56,7 +56,7 @@ openwalk tool ls
 发现 hub 上的工具：
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 ```
 
 运行网站命令：
@@ -128,7 +128,7 @@ openwalk exec browser-open https://example.com -s=demo --profile /tmp/openwalk-p
 OpenWalk 可以从 `openwalkhub` 拉取可复用的网站工具。先从这里开始：
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 ```
 
 一些常见工具类型包括：
@@ -138,7 +138,7 @@ openwalk exec openwalkhub/tools
 - 详情页读取：`v2ex/topic`、`zhihu/question`、`hackernews/thread`、`reddit/thread`
 - 平台或账号工作流：`github/issues`、`twitter/bookmarks`、`linkedin/profile`
 
-工具可用性会随时间变化，所以建议用 `openwalk exec openwalkhub/tools` 查看当前列表。
+工具可用性会随时间变化，所以建议用 `openwalk exec hub/tools` 查看当前列表。
 
 ## 给人用，也给 Agent 用
 
@@ -154,7 +154,7 @@ openwalk exec openwalkhub/tools
 ## 从这里继续
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 openwalk tool ls
 openwalk exec browser-open --help
 openwalk tool info bing/search

@@ -7,7 +7,7 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
     name = "openwalk",
     version,
     about = "Local-first tool runner with built-in browser automation",
-    after_help = "Examples:\n  openwalk exec openwalkhub/tools\n  openwalk tool ls\n  openwalk exec browser-open --help\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
+    after_help = "Discover tools:\n  openwalk tool ls                 List workspace, global, and kit tools\n  openwalk tool ls --all           Include built-in tools\n  openwalk tool info <tool>        Show usage, arguments, options, returns, and examples\n  openwalk exec <tool> --help      Show tool help without running it\n\nRemote tools:\n  openwalk exec hub/tools          Discover tools from the remote hub\n  openwalk exec v2ex/hot           Pull and run a remote tool by ref\n\nExamples:\n  openwalk tool ls\n  openwalk tool info browser-open\n  openwalk exec browser-open --help\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -18,13 +18,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Initialize the current project
     // Init(InitArgs),
     /// Install tools declared in openwalk.json
     Install(ProjectInstallArgs),
     /// Execute a built-in tool, script, or installed tool
     Exec(ToolExecArgs),
-    ///  List, inspect, add, install, and remove tools
+    /// List and inspect available tools
+    #[command(
+        after_help = "Examples:\n  openwalk tool ls\n  openwalk tool ls --all\n  openwalk tool ls --source kit\n  openwalk tool info browser-open\n\n"
+    )]
     Tool {
         #[command(subcommand)]
         command: ToolCommand,
@@ -85,6 +87,7 @@ Usage:\n  openwalk exec <tool> [args...]\n\n\
 Arguments:\n  <tool>      Built-in tool name, tool ref, or local .scm path\n  [args...]   Arguments and tool-specific options passed to the tool\n\n\
 Common options after <tool>:\n  -s, --session <name>       Browser session name\n  -f, --format <format>      Output format: text, yaml, md, or json\n  --all                      Include execution metadata in the output\n  --help                     Show help for the selected tool\n\n\
 Discover tools:\n  openwalk tool ls           List workspace, global, and kit tools\n  openwalk tool ls --all     Include built-in tools\n  openwalk tool info <tool>  Show usage, arguments, options, returns, and examples\n\n\
+Remote tools:\n  openwalk exec hub/tools    Discover tools from the remote hub\n  openwalk exec v2ex/hot     Pull and run a remote tool by ref\n\n\
 Examples:\n  openwalk exec browser-open https://example.com -s=demo --headed\n  openwalk exec page-snapshot -s=demo --format=json\n  openwalk exec browser-open --help\n  openwalk exec search \"rust mcp\"\n"
 }
 
@@ -127,6 +130,9 @@ pub enum ToolCommand {
     //     package: String,
     // },
     /// List runnable workspace, global, and kit tools.
+    #[command(
+        after_help = "Notes:\n  Built-in tools are hidden by default. Use `--all` to include them.\n  Use `--source` to filter by workspace, global, kit, or builtin.\n\nExamples:\n  openwalk tool ls\n  openwalk tool ls --all\n  openwalk tool ls --source kit\n  openwalk tool ls --format=json\n\n"
+    )]
     Ls {
         /// Output format: text (default compact list), yaml, md, or json.
         #[arg(short = 'f', long = "format", default_value = "text")]
@@ -141,6 +147,9 @@ pub enum ToolCommand {
         all: bool,
     },
     /// Show usage and metadata for a built-in tool, installed tool, or local Scheme script.
+    #[command(
+        after_help = "Examples:\n  openwalk tool info browser-open\n  openwalk tool info search\n  openwalk tool info ./demo.scm\n  openwalk tool info browser-open --format=json\n\n"
+    )]
     Info {
         /// Built-in tool name, tool ref, or local .scm file path.
         tool: String,

@@ -11,7 +11,7 @@ openwalk exec <tool> [args...]
 Use it when a website workflow should stop being a one-off script and become something you can run, inspect, reuse, and hand to an agent.
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 openwalk tool ls
 
 openwalk exec bing/search "Claude Code" 5
@@ -56,7 +56,7 @@ openwalk tool ls
 Discover hub tools:
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 ```
 
 Run a website command:
@@ -128,7 +128,7 @@ Useful built-in browser tools include:
 OpenWalk can pull reusable website tools from `openwalkhub`. Start with:
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 ```
 
 Examples of useful hub-style commands include:
@@ -138,7 +138,7 @@ Examples of useful hub-style commands include:
 - Detail pages: `v2ex/topic`, `zhihu/question`, `hackernews/thread`, `reddit/thread`
 - Account or platform workflows: `github/issues`, `twitter/bookmarks`, `linkedin/profile`
 
-Availability changes over time, so prefer `openwalk exec openwalkhub/tools` for the current list.
+Availability changes over time, so prefer `openwalk exec hub/tools` for the current list.
 
 ## For Humans And Agents
 
@@ -154,7 +154,7 @@ For agents, OpenWalk provides a stable local action surface:
 ## Continue From Here
 
 ```bash
-openwalk exec openwalkhub/tools
+openwalk exec hub/tools
 openwalk tool ls
 openwalk exec browser-open --help
 openwalk tool info bing/search
