@@ -1,6 +1,6 @@
 # OpenWalk
 
-Turn websites into reusable local commands.
+Turn websites and browsers into reusable local tools.
 
 OpenWalk is a local-first CLI for running website tools, built-in browser automation, and local Scheme tools behind one entry point:
 
@@ -27,7 +27,7 @@ If a hub tool is not installed yet, `openwalk exec` can fetch it into the curren
 
 ## Why OpenWalk
 
-- Turn website capabilities into commands instead of throwaway scripts
+- Turn website capabilities into reusable tools instead of throwaway scripts
 - Use a real local browser when scraping is not enough
 - Reuse local login state, browser profiles, files, and environment
 - Give humans and AI agents the same stable execution surface

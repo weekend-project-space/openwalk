@@ -6,7 +6,7 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "openwalk",
     version,
-    about = "Local-first tool runner with built-in browser automation",
+    about = "Turn websites and browsers into reusable local tools.",
     after_help = "Discover tools:\n  openwalk tool ls                 List workspace, global, and kit tools\n  openwalk tool ls --all           Include built-in tools\n  openwalk tool info <tool>        Show usage, arguments, options, returns, and examples\n  openwalk exec <tool> --help      Show tool help without running it\n\nRemote tools:\n  openwalk exec hub/tools          Discover tools from the remote hub\n  openwalk exec v2ex/hot           Pull and run a remote tool by ref\n\nExamples:\n  openwalk tool ls\n  openwalk tool info browser-open\n  openwalk exec browser-open --help\n  openwalk exec browser-open https://example.com -s=demo --headed\n\n",
     arg_required_else_help = true
 )]
