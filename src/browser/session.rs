@@ -37,6 +37,8 @@ pub struct BrowserSessionState {
     pub active_target_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_token: Option<String>,
     pub started_at: u64,
 }
 
@@ -199,6 +201,7 @@ pub async fn start_browser_session(
         headless,
         active_target_id: resolve_active_target_id(None, &details.page_target_ids),
         daemon_port: None,
+        daemon_token: None,
         started_at: unix_timestamp_now()?,
     };
 
@@ -385,21 +388,24 @@ pub fn list_browser_sessions(global_home: &GlobalHome) -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn browser_session_daemon_port(
+pub fn browser_session_daemon_auth(
     global_home: &GlobalHome,
     session_name: &str,
-) -> Result<Option<u16>> {
-    Ok(load_state(global_home, session_name)?.and_then(|handle| handle.state.daemon_port))
+) -> Result<Option<(u16, String)>> {
+    Ok(load_state(global_home, session_name)?
+        .and_then(|handle| Some((handle.state.daemon_port?, handle.state.daemon_token?))))
 }
 
-pub fn record_browser_session_daemon_port(
+pub fn record_browser_session_daemon_auth(
     global_home: &GlobalHome,
     session_name: &str,
     port: u16,
+    token: String,
 ) -> Result<()> {
     let mut handle = load_state(global_home, session_name)?
         .ok_or_else(|| anyhow!("browser session `{session_name}` is not found"))?;
     handle.state.daemon_port = Some(port);
+    handle.state.daemon_token = Some(token);
     save_state(&handle.manifest_path, &handle.state)
 }
 
@@ -789,6 +795,7 @@ mod tests {
                 headless: true,
                 active_target_id: None,
                 daemon_port: None,
+                daemon_token: None,
                 started_at: 2,
             },
         )
@@ -805,6 +812,7 @@ mod tests {
                 headless: false,
                 active_target_id: None,
                 daemon_port: None,
+                daemon_token: None,
                 started_at: 1,
             },
         )

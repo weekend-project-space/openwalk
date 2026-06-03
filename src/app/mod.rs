@@ -79,7 +79,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             sync_kit_from_hub(&global_home.kit_dir())?;
             handle_tool_command(&workspace, &global_home, command)
         }
-        Command::Daemon(args) => crate::daemon::run_session_daemon(args.session, args.port).await,
+        Command::Daemon(args) => {
+            crate::daemon::run_session_daemon(args.session, args.port, args.token).await
+        }
     }
 }
 

@@ -46,8 +46,8 @@ use tokio::{
 };
 
 pub use session::{
-    attach_browser_session_with_options, browser_session_daemon_port,
-    ensure_browser_session_with_options, list_browser_sessions, record_browser_session_daemon_port,
+    attach_browser_session_with_options, browser_session_daemon_auth,
+    ensure_browser_session_with_options, list_browser_sessions, record_browser_session_daemon_auth,
     BrowserSessionLaunchOptions,
 };
 pub use types::{

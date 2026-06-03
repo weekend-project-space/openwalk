@@ -97,6 +97,8 @@ pub struct DaemonArgs {
     pub session: String,
     #[arg(long)]
     pub port: u16,
+    #[arg(long)]
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

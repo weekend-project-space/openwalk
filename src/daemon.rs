@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as FmtWrite,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     path::PathBuf,
@@ -13,8 +14,8 @@ use tokio::runtime::Handle;
 
 use crate::{
     browser::{
-        attach_browser_session_with_options, browser_session_daemon_port,
-        ensure_browser_session_with_options, record_browser_session_daemon_port, BrowserService,
+        attach_browser_session_with_options, browser_session_daemon_auth,
+        ensure_browser_session_with_options, record_browser_session_daemon_auth, BrowserService,
         BrowserSessionLaunchOptions,
     },
     runtime_args::BrowserLaunchOptions,
@@ -29,8 +30,11 @@ const DAEMON_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 enum DaemonRequest {
-    Ping,
+    Ping {
+        token: String,
+    },
     Execute {
+        token: String,
         tool: String,
         args: Vec<String>,
         launch: DaemonLaunchOptions,
@@ -85,11 +89,13 @@ struct SessionDaemonState {
     browser: Option<BrowserService>,
 }
 
-pub async fn run_session_daemon(session_name: String, port: u16) -> Result<()> {
+pub async fn run_session_daemon(session_name: String, port: u16, token: String) -> Result<()> {
     let handle = Handle::current();
-    tokio::task::spawn_blocking(move || run_session_daemon_blocking(session_name, port, handle))
-        .await
-        .context("session daemon task failed to join")?
+    tokio::task::spawn_blocking(move || {
+        run_session_daemon_blocking(session_name, port, token, handle)
+    })
+    .await
+    .context("session daemon task failed to join")?
 }
 
 pub async fn execute_session_builtin(
@@ -99,10 +105,11 @@ pub async fn execute_session_builtin(
     args: &[String],
     launch_options: &BrowserLaunchOptions,
 ) -> Result<JsonValue> {
-    let port = ensure_session_daemon(global_home, session_name).await?;
+    let (port, token) = ensure_session_daemon(global_home, session_name).await?;
     let response = send_daemon_request(
         port,
         &DaemonRequest::Execute {
+            token: token.clone(),
             tool: tool.to_string(),
             args: args.to_vec(),
             launch: DaemonLaunchOptions::from(launch_options),
@@ -119,7 +126,7 @@ pub async fn execute_session_builtin(
     }
 
     if tool != "browser-close" {
-        record_browser_session_daemon_port(global_home, session_name, port)?;
+        record_browser_session_daemon_auth(global_home, session_name, port, token)?;
     }
 
     response
@@ -127,20 +134,29 @@ pub async fn execute_session_builtin(
         .ok_or_else(|| anyhow!("session daemon returned an empty response"))
 }
 
-async fn ensure_session_daemon(global_home: &GlobalHome, session_name: &str) -> Result<u16> {
-    if let Some(port) = browser_session_daemon_port(global_home, session_name)? {
-        if daemon_is_alive(port) {
-            return Ok(port);
+async fn ensure_session_daemon(
+    global_home: &GlobalHome,
+    session_name: &str,
+) -> Result<(u16, String)> {
+    if let Some((port, token)) = browser_session_daemon_auth(global_home, session_name)? {
+        if daemon_is_alive(port, token.as_str()) {
+            return Ok((port, token));
         }
     }
 
     let port = pick_free_port()?;
-    spawn_session_daemon(session_name, port)?;
-    wait_for_session_daemon(port).await?;
-    Ok(port)
+    let token = generate_daemon_token()?;
+    spawn_session_daemon(session_name, port, token.as_str())?;
+    wait_for_session_daemon(port, token.as_str()).await?;
+    Ok((port, token))
 }
 
-fn run_session_daemon_blocking(session_name: String, port: u16, handle: Handle) -> Result<()> {
+fn run_session_daemon_blocking(
+    session_name: String,
+    port: u16,
+    token: String,
+    handle: Handle,
+) -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .with_context(|| format!("failed to bind session daemon on 127.0.0.1:{port}"))?;
     let global_home = GlobalHome::discover().context("failed to discover openwalk home")?;
@@ -151,22 +167,39 @@ fn run_session_daemon_blocking(session_name: String, port: u16, handle: Handle) 
         let request = read_daemon_request(&mut stream);
         let mut should_stop = false;
         let response = match request {
-            Ok(DaemonRequest::Ping) => DaemonResponse::ok(json!({"status": "ok"})),
-            Ok(DaemonRequest::Execute { tool, args, launch }) => {
-                let result = handle.block_on(execute_daemon_builtin(
-                    &global_home,
-                    session_name.as_str(),
-                    &mut state,
-                    tool.as_str(),
-                    args.as_slice(),
-                    &launch,
-                ));
-                if tool == "browser-close" && result.is_ok() {
-                    should_stop = true;
+            Ok(DaemonRequest::Ping {
+                token: request_token,
+            }) => {
+                if request_token == token {
+                    DaemonResponse::ok(json!({"status": "ok"}))
+                } else {
+                    DaemonResponse::err("unauthorized session daemon request".to_string())
                 }
-                match result {
-                    Ok(result) => DaemonResponse::ok(result),
-                    Err(err) => DaemonResponse::err(format!("{err:#}")),
+            }
+            Ok(DaemonRequest::Execute {
+                token: request_token,
+                tool,
+                args,
+                launch,
+            }) => {
+                if request_token != token {
+                    DaemonResponse::err("unauthorized session daemon request".to_string())
+                } else {
+                    let result = handle.block_on(execute_daemon_builtin(
+                        &global_home,
+                        session_name.as_str(),
+                        &mut state,
+                        tool.as_str(),
+                        args.as_slice(),
+                        &launch,
+                    ));
+                    if tool == "browser-close" && result.is_ok() {
+                        should_stop = true;
+                    }
+                    match result {
+                        Ok(result) => DaemonResponse::ok(result),
+                        Err(err) => DaemonResponse::err(format!("{err:#}")),
+                    }
                 }
             }
             Err(err) => DaemonResponse::err(format!("{err:#}")),
@@ -237,7 +270,7 @@ async fn create_session_browser_service(
     Ok(BrowserService::attach_session(handle))
 }
 
-fn spawn_session_daemon(session_name: &str, port: u16) -> Result<()> {
+fn spawn_session_daemon(session_name: &str, port: u16, token: &str) -> Result<()> {
     let executable = std::env::current_exe().context("failed to resolve current executable")?;
     let args = [
         "daemon".to_string(),
@@ -245,6 +278,8 @@ fn spawn_session_daemon(session_name: &str, port: u16) -> Result<()> {
         session_name.to_string(),
         "--port".to_string(),
         port.to_string(),
+        "--token".to_string(),
+        token.to_string(),
     ];
 
     spawn_detached_command(&executable, &args).context("failed to spawn session daemon")
@@ -282,10 +317,10 @@ fn spawn_plain_command(executable: &std::path::Path, args: &[String]) -> Result<
     Ok(())
 }
 
-async fn wait_for_session_daemon(port: u16) -> Result<()> {
+async fn wait_for_session_daemon(port: u16, token: &str) -> Result<()> {
     let deadline = std::time::Instant::now() + DAEMON_READY_TIMEOUT;
     while std::time::Instant::now() < deadline {
-        if daemon_is_alive(port) {
+        if daemon_is_alive(port, token) {
             return Ok(());
         }
         tokio::time::sleep(DAEMON_READY_POLL_INTERVAL).await;
@@ -295,10 +330,26 @@ async fn wait_for_session_daemon(port: u16) -> Result<()> {
     ))
 }
 
-fn daemon_is_alive(port: u16) -> bool {
-    send_daemon_request(port, &DaemonRequest::Ping)
-        .map(|response| response.ok)
-        .unwrap_or(false)
+fn daemon_is_alive(port: u16, token: &str) -> bool {
+    send_daemon_request(
+        port,
+        &DaemonRequest::Ping {
+            token: token.to_string(),
+        },
+    )
+    .map(|response| response.ok)
+    .unwrap_or(false)
+}
+
+fn generate_daemon_token() -> Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).context("failed to generate session daemon token")?;
+
+    let mut token = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    Ok(token)
 }
 
 fn send_daemon_request(port: u16, request: &DaemonRequest) -> Result<DaemonResponse> {
